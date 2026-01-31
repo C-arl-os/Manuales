@@ -11,7 +11,6 @@
 - [📘 Manual personal de Git](#-manual-personal-de-git)
   - [📌 Información general](#-información-general)
   - [🧭 Índice](#-índice)
-    - [📝 Formato Markdown útil](#-formato-markdown-útil)
   - [1️⃣ Propósito y objetivos](#1️⃣-propósito-y-objetivos)
   - [2️⃣ Conceptos clave](#2️⃣-conceptos-clave)
   - [3️⃣ Flujo de trabajo sugerido](#3️⃣-flujo-de-trabajo-sugerido)
@@ -44,12 +43,9 @@
   - [Git Alias](#git-alias)
     - [¿Qué es un git alias?](#qué-es-un-git-alias)
   - [GITIGNORE](#gitignore)
+    - [¿Qué es?](#qué-es)
+  - [GIT DIFF](#git-diff)
 
-### 📝 Formato Markdown útil
-- Usa tablas para comparar comandos, errores o conceptos semejantes.
-- Prefiere listas cortas con verbos y enfócate en la acción tomada.
-- Resalta hallazgos importantes con iconos (`✅`, `⚠️`, `❌`).
-- Divide secciones largas con subtítulos (`###`) para mantener claridad.
 
 ## 1️⃣ Propósito y objetivos
 - **Meta de aprendizaje:** ¿Qué deseas dominar con Git ahora? (ej. ramas, rebases, colaborar)
@@ -488,3 +484,73 @@ git log --graph --decorate --all --oneline
 
 
 ## GITIGNORE
+
+### ¿Qué es?
+
+`.gitignore` es un archivo que le dice a Git qué archivos o carpetas NO debe rastrear ni subir al repositorio.
+
+Se usa para ignorar:
+
+Archivos temporales
+- Dependencias
+- Configuraciones locales
+- Archivos generados automáticamente
+
+📂 ¿Dónde va?
+
+En la raíz del proyecto.
+
+✍️ Ejemplo básico
+1. Dependencias
+node_modules/
+
+2. Archivos temporales
+*.log
+*.tmp
+
+3. Variables de entorno
+.env
+
+
+.gitignore no elimina archivos ya agregados al repositorio.
+Solo evita que se agreguen a futuro.
+
+**Ejemplo**
+```BASH
+$ git status
+On branch main
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   holamundo.js
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        Imagenes/
+        Manual.md
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+sanci@Sancir MINGW64 ~/Desktop/HTML/GIT (main)
+$ touch .gitignore
+
+
+```
+Dentro del fichero se agrega todo lo quieres que no se agregue o sea molesto al hacer un git status en este caso no quiero que aparezca Imagenes dentro de pondremos **/ y dara igual que archivo es lo va a ignorar.
+
+Despues de ignorar.
+
+```BASH
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        .gitignore
+        Manual.md
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+```
+
+## GIT DIFF
+
+
