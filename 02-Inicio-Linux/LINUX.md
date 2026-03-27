@@ -15,6 +15,7 @@
   - [Lab 01 — Primeros pasos en la terminal](#lab-01--primeros-pasos-en-la-terminal)
   - [Lab 02 — Operaciones con archivos y directorios](#lab-02--operaciones-con-archivos-y-directorios)
   - [Lab 03 — Contenido y comparación de archivos](#lab-03--contenido-y-comparación-de-archivos)
+  - [Lab 04 — Permisos de archivos](#lab-04--permisos-de-archivos)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -966,6 +967,314 @@ diff -r old_configs/ new_configs/
 
 ---
 
+---
+
+### Lab 04 — Permisos de archivos
+
+**Objetivo del lab:** Entender el sistema de permisos de Linux y saber cambiar propietario y permisos de archivos y directorios.
+
+---
+
+#### Cómo funciona el sistema de permisos en Linux
+
+Cada archivo y directorio tiene tres niveles de acceso y tres tipos de permiso:
+
+**Niveles (¿para quién?):**
+```
+u         g         o
+usuario   grupo     otros
+(owner)  (group)   (others)
+```
+
+**Tipos (¿qué puede hacer?):**
+
+| Letra | Nombre | Sobre archivo | Sobre directorio |
+|-------|--------|--------------|-----------------|
+| `r` | read | leer el contenido | listar archivos con `ls` |
+| `w` | write | modificar/borrar | crear/borrar archivos dentro |
+| `x` | execute | ejecutar como programa | entrar con `cd` |
+| `-` | ninguno | sin ese permiso | sin ese permiso |
+
+**Cómo se lee la cadena de permisos:**
+```
+-rwxr-xr--
+│ │││ │││ │││
+│ └┤┘ └┤┘ └┤┘
+│  │   │   └─ otros (o): r--  = solo lectura
+│  │   └─────  grupo (g): r-x  = lectura y ejecución
+│  └─────────  propietario (u): rwx = todo
+└──────────── tipo: - = archivo, d = directorio
+```
+
+---
+
+#### Notación numérica de permisos
+
+Cada permiso tiene un valor numérico:
+
+| Permiso | Valor |
+|---------|-------|
+| `r` | 4 |
+| `w` | 2 |
+| `x` | 1 |
+| ninguno | 0 |
+
+Se suman para cada nivel:
+
+```
+rwx = 4+2+1 = 7
+rw- = 4+2+0 = 6
+r-x = 4+0+1 = 5
+r-- = 4+0+0 = 4
+--- = 0+0+0 = 0
+```
+
+Los tres dígitos representan `usuario`, `grupo`, `otros`:
+
+| Código | u | g | o | Significado |
+|--------|---|---|---|-------------|
+| `700` | rwx | --- | --- | Solo el dueño tiene acceso total |
+| `755` | rwx | r-x | r-x | Dueño total, grupo y otros pueden leer y ejecutar |
+| `644` | rw- | r-- | r-- | Dueño lee/escribe, el resto solo lee |
+| `600` | rw- | --- | --- | Solo el dueño lee/escribe, nadie más ve nada |
+
+---
+
+#### `sudo` — Ejecutar como administrador
+
+**Sintaxis:**
+```
+sudo comando
+```
+
+**Qué hace:** Ejecuta el comando con privilegios de `root` (superusuario). Pedirá tu contraseña.
+
+```bash
+$ sudo chown root:root example.txt
+```
+
+> Usa `sudo` solo cuando sea necesario. Un error con `sudo` puede afectar archivos del sistema.
+
+---
+
+#### `mkdir -p` — Crear directorios anidados en un solo paso
+
+**Sintaxis:**
+```
+mkdir -p ruta/con/subdirectorios
+```
+
+**Qué hace:** Crea toda la cadena de directorios de una vez. Sin `-p`, fallaría si el directorio padre no existe.
+
+```bash
+$ mkdir -p new-dir/subdir
+$ ls -lR new-dir
+new-dir:
+-rw-rw-r-- 1 labex labex 13 Mar 27 10:55 file1.txt
+drwxrwxr-x 2 labex labex 23 Mar 27 10:55 subdir
+
+new-dir/subdir:
+-rw-rw-r-- 1 labex labex 13 Mar 27 10:55 file2.txt
+```
+
+---
+
+#### `chown` — Cambiar propietario de un archivo
+
+**Sintaxis:**
+```
+chown usuario:grupo archivo
+chown -R usuario:grupo directorio    # recursivo
+```
+
+**Qué hace:** Cambia el usuario y/o grupo propietario. Normalmente requiere `sudo`.
+
+**Cambiar dueño y grupo:**
+```bash
+$ sudo chown root:root example.txt
+$ ls -l example.txt
+-rw-rw-r-- 1 root root 0 Mar 27 10:53 example.txt
+#                ^^^^ ^^^^
+#                │    └─ grupo ahora es root
+#                └─ usuario ahora es root
+```
+
+**Solo cambiar el usuario (sin tocar el grupo):**
+```bash
+$ sudo chown labex example.txt
+```
+
+**Solo cambiar el grupo:**
+```bash
+$ sudo chown :labex example.txt
+```
+
+**Cambio recursivo en todo un directorio:**
+```bash
+$ sudo chown -R labex:labex new-dir/
+```
+
+**Error que cometiste:**
+```bash
+$ sudo chown root:root ecample.txt
+chown: cannot access 'ecample.txt': No such file or directory
+# ← typo: 'ecample' en lugar de 'example'. chown es exacto con los nombres.
+```
+
+---
+
+#### `chmod` — Cambiar permisos de un archivo o directorio
+
+**Sintaxis:**
+```
+chmod NNN archivo          # notación numérica
+chmod [ugoa][+-=][rwx] archivo   # notación simbólica
+chmod -R NNN directorio    # recursivo
+```
+
+---
+
+##### Notación numérica
+
+```bash
+$ sudo chmod 700 example.txt
+$ ls -l example.txt
+-rwx------ 1 root root 0 Mar 27 10:53 example.txt
+# 7 = rwx para el dueño, 0 = --- para grupo, 0 = --- para otros
+```
+
+```bash
+$ chmod 755 test-dir
+$ ls -ld test-dir
+drwxr-xr-x 2 labex labex 6 Mar 27 10:59 test-dir
+# 7 = rwx dueño, 5 = r-x grupo, 5 = r-x otros
+```
+
+> **`ls -ld`** muestra los permisos del directorio en sí, no de su contenido. Sin la `d`, listaría lo que hay dentro.
+
+---
+
+##### Notación simbólica
+
+En lugar de números, describes el cambio con letras:
+
+```
+chmod  u+x  script.sh
+       │ │
+       │ └─ qué permiso: r, w, x
+       └─── a quién:  u (user), g (group), o (others), a (all/todos)
+
+operadores:
+  +  agrega el permiso sin tocar los demás
+  -  quita el permiso sin tocar los demás
+  =  establece exactamente esos permisos (borra los que no menciones)
+```
+
+**Ejemplo del lab — dar permiso de ejecución al dueño:**
+```bash
+$ ls -l script.sh
+-rw-rw-r-- 1 labex labex 32 Mar 27 11:00 script.sh
+
+$ chmod u+x script.sh
+
+$ ls -l script.sh
+-rwxrw-r-- 1 labex labex 32 Mar 27 11:00 script.sh
+#    ^ ← se agregó 'x' solo para el usuario (u), grupo y otros no cambiaron
+```
+
+**Más ejemplos:**
+```bash
+$ chmod g-w archivo      # quita escritura al grupo
+$ chmod o+r archivo      # da lectura a otros
+$ chmod a+x script.sh    # da ejecución a todos (u, g y o)
+$ chmod u=rw archivo     # dueño queda con rw exactamente (borra x si lo tenía)
+```
+
+---
+
+##### Por qué importa el permiso de ejecución en scripts
+
+```bash
+$ ./script.sh
+zsh: permission denied: ./script.sh
+# ← sin 'x', Linux no lo ejecuta aunque seas el dueño
+
+$ chmod u+x script.sh
+$ ./script.sh
+Hello, World               # ← ahora sí funciona
+```
+
+> `./` significa "ejecuta este archivo del directorio actual". Linux no ejecuta archivos del directorio actual por seguridad a menos que lo pidas explícitamente con `./`.
+
+---
+
+**Error que cometiste:**
+```bash
+$ chmod -R test-dir
+chmod: missing operand after 'test-dir'
+# ← faltó el permiso. La sintaxis correcta es: chmod -R PERMISOS directorio
+# Ejemplo correcto: chmod -R 755 test-dir
+```
+
+---
+
+### Ejercicio — Lab 04
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux.
+
+**Escenario:** Vas a preparar un proyecto con archivos que tienen diferentes niveles de acceso.
+
+**Preparación:**
+```bash
+mkdir ~/lab04 && cd ~/lab04
+touch secreto.txt publico.txt script.sh
+echo "datos privados" > secreto.txt
+echo "datos públicos" > publico.txt
+echo '#!/bin/bash
+echo "Script ejecutado correctamente"' > script.sh
+mkdir -p proyecto/src proyecto/docs
+echo "codigo" > proyecto/src/main.sh
+echo "documentacion" > proyecto/docs/readme.txt
+```
+
+**Tareas:**
+
+1. Lista todos los archivos con permisos detallados (`ls -l`).
+2. Aplica permisos `600` a `secreto.txt` (solo el dueño puede leer y escribir).
+3. Aplica permisos `644` a `publico.txt` (dueño escribe, todos leen).
+4. Intenta ejecutar `./script.sh` — observa el error. Luego dale permiso de ejecución **solo al dueño** con notación simbólica.
+5. Verifica que ahora sí ejecuta.
+6. Aplica `755` al directorio `proyecto/` de forma recursiva.
+7. Lista `ls -ld proyecto/` y `ls -l proyecto/src/` para confirmar.
+8. Compara visualmente los permisos de `secreto.txt` (600) vs `publico.txt` (644) — ¿qué diferencia ves en la cadena `rwx`?
+
+**Resultado esperado al verificar permisos:**
+```
+-rw------- labex labex secreto.txt       ← solo el dueño
+-rw-r--r-- labex labex publico.txt       ← dueño escribe, todos leen
+-rwxr--r-- labex labex script.sh         ← dueño ejecuta
+drwxr-xr-x labex labex proyecto/         ← todos pueden entrar y leer
+```
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+ls -l
+chmod 600 secreto.txt
+chmod 644 publico.txt
+./script.sh           # verás el error
+chmod u+x script.sh
+./script.sh           # ahora funciona
+chmod -R 755 proyecto/
+ls -ld proyecto/
+ls -l proyecto/src/
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -1002,6 +1311,14 @@ diff -r old_configs/ new_configs/
 | `tail -c N archivo` | Muestra los últimos N bytes | 03 |
 | `diff arch1 arch2` | Muestra diferencias entre dos archivos | 03 |
 | `diff -r dir1 dir2` | Compara dos directorios recursivamente | 03 |
+| `sudo comando` | Ejecuta el comando como administrador (root) | 04 |
+| `mkdir -p ruta/sub` | Crea directorios anidados en un paso | 04 |
+| `chown user:grupo arch` | Cambia propietario y grupo de un archivo | 04 |
+| `chown -R user:grupo dir` | Cambia propietario recursivamente | 04 |
+| `chmod NNN archivo` | Cambia permisos con notación numérica | 04 |
+| `chmod u+x archivo` | Agrega ejecución al dueño (notación simbólica) | 04 |
+| `chmod -R NNN dir` | Cambia permisos recursivamente | 04 |
+| `ls -ld dir` | Muestra permisos del directorio en sí | 04 |
 
 ---
 
@@ -1026,6 +1343,13 @@ diff -r old_configs/ new_configs/
 | **Byte** | Unidad mínima de datos — un carácter de texto ocupa generalmente 1 byte |
 | **`\n`** | Salto de línea — carácter invisible que separa líneas en un archivo |
 | **`diff`** | Herramienta para ver qué cambió entre dos versiones de un archivo |
+| **`sudo`** | Superuser do — ejecuta un comando con permisos de administrador |
+| **`root`** | Superusuario de Linux con acceso total al sistema |
+| **`chown`** | Change owner — cambia el propietario de un archivo |
+| **`chmod`** | Change mode — cambia los permisos de un archivo |
+| **Notación numérica** | Permisos en forma de 3 dígitos, ej. `755` (r=4, w=2, x=1) |
+| **Notación simbólica** | Permisos con letras, ej. `u+x`, `g-w`, `o=r` |
+| **`./`** | Prefijo para ejecutar un archivo del directorio actual |
 
 ---
 
