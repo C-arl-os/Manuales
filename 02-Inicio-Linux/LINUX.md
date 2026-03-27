@@ -14,6 +14,7 @@
 - [Labs](#labs)
   - [Lab 01 — Primeros pasos en la terminal](#lab-01--primeros-pasos-en-la-terminal)
   - [Lab 02 — Operaciones con archivos y directorios](#lab-02--operaciones-con-archivos-y-directorios)
+  - [Lab 03 — Contenido y comparación de archivos](#lab-03--contenido-y-comparación-de-archivos)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -726,6 +727,245 @@ ls -la
 
 ---
 
+---
+
+### Lab 03 — Contenido y comparación de archivos
+
+**Objetivo del lab:** Ver el contenido de archivos (completo o parcial) y comparar diferencias entre archivos y directorios.
+
+---
+
+#### `cat` — Ver el contenido completo de un archivo
+
+**Sintaxis:**
+```
+cat archivo
+cat -n archivo    # con números de línea
+```
+
+**Qué hace:** Imprime en pantalla todo el contenido del archivo de una vez.
+
+**Ejemplo:**
+```bash
+$ cat /tmp/hello
+Hi,
+I am Labby!
+```
+
+**Con números de línea (`-n`):**
+```bash
+$ cat -n /tmp/hello
+     1	Hi,
+     2	I am Labby!
+```
+
+Útil para archivos de código o configuración donde necesitas referenciar líneas exactas.
+
+> **Cuándo NO usar `cat`:** En archivos muy largos (cientos de líneas), `cat` los imprime todos de golpe. Para esos casos usa `head`, `tail` o `less`.
+
+---
+
+#### `head` — Ver el inicio de un archivo
+
+**Sintaxis:**
+```
+head -n N archivo    # primeras N líneas
+head -c N archivo    # primeros N bytes
+```
+
+**Qué hace:** Muestra solo el principio del archivo. Por defecto muestra las primeras 10 líneas.
+
+**Por líneas:**
+```bash
+$ head -n1 /tmp/hello
+Hi,
+```
+
+Lee: "dame la primera **1** línea".
+
+**Por bytes (`-c`):**
+```bash
+$ head -c1 /tmp/hello
+H
+$ head -c2 /tmp/hello
+Hi
+```
+
+Lee: "dame los primeros **N** bytes (caracteres)".
+
+**Error que cometiste:**
+```bash
+$ head -n1 /tmp/helo
+head: cannot open '/tmp/helo' for reading: No such file or directory
+# ← typo: faltó una 'l' en 'hello'. Linux es exacto con los nombres.
+```
+
+> **Cuándo usarlo:** Para ver las primeras líneas de un log, el encabezado de un CSV, o confirmar que un archivo contiene lo que esperas sin abrirlo todo.
+
+---
+
+#### `tail` — Ver el final de un archivo
+
+**Sintaxis:**
+```
+tail -n N archivo    # últimas N líneas
+tail -c N archivo    # últimos N bytes
+```
+
+**Qué hace:** Muestra solo el final del archivo. Por defecto muestra las últimas 10 líneas.
+
+**Por líneas:**
+```bash
+$ tail -n1 /tmp/hello
+I am Labby!
+```
+
+**Por bytes:**
+```bash
+$ tail -c1 /tmp/hello
+          ← (imprime el último byte: un salto de línea, no se ve)
+
+$ tail -c2 /tmp/hello
+!
+```
+
+**¿Por qué `tail -c1` no mostró nada visible?**
+El último byte del archivo es un salto de línea (`\n`) — un carácter invisible. Por eso la terminal mostró una línea en blanco. `tail -c2` mostró `!` porque ese es el penúltimo carácter.
+
+> **Caso de uso estrella:** Ver los últimos errores de un log en tiempo real:
+> ```bash
+> tail -n 20 /var/log/syslog
+> ```
+
+---
+
+#### `diff` — Comparar dos archivos
+
+**Sintaxis:**
+```
+diff archivo1 archivo2
+diff -r directorio1 directorio2    # comparar directorios
+```
+
+**Qué hace:** Muestra las líneas que son **distintas** entre dos archivos. Si no hay salida, los archivos son idénticos.
+
+**Ejemplo:**
+```bash
+$ diff file1 file2
+1c1
+< this is file1
+---
+> this is file2
+```
+
+**Cómo leer la salida de `diff`:**
+
+```
+1c1
+< this is file1
+---
+> this is file2
+```
+
+| Parte | Significado |
+|-------|-------------|
+| `1c1` | línea **1** del archivo1 fue **c**ambiada por línea **1** del archivo2 |
+| `<` | línea que viene del **primer** archivo (el de la izquierda) |
+| `---` | separador entre las dos versiones |
+| `>` | línea que viene del **segundo** archivo (el de la derecha) |
+
+**Otros códigos posibles:**
+- `a` → línea **a**gregada en el segundo archivo
+- `d` → línea **d**eletada (solo en el primero)
+- `c` → línea **c**ambiada
+
+**Si los archivos son iguales:**
+```bash
+$ diff file1 file1
+           ← sin salida = sin diferencias
+```
+
+---
+
+#### `diff -r` — Comparar directorios completos
+
+```bash
+$ diff -r ~/Desktop ~/Code
+Only in /home/labex/Desktop: code.desktop
+Only in /home/labex/Desktop: gedit.desktop
+Only in /home/labex/Desktop: gvim.desktop
+Only in /home/labex/Desktop: xfce4-terminal.desktop
+```
+
+**Cómo leer la salida:**
+- `Only in /ruta/dir: archivo` → ese archivo existe solo en ese directorio, no en el otro
+- Si un archivo existe en ambos pero con contenido distinto, `diff -r` mostrará las diferencias línea por línea igual que `diff` normal
+
+> `-r` es recursivo: entra en subdirectorios y compara todo el árbol, no solo el nivel superior.
+
+---
+
+### Ejercicio — Lab 03
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux.
+
+**Escenario:** Tienes dos versiones de un archivo de configuración y necesitas inspeccionarlas y encontrar las diferencias.
+
+**Preparación (ejecuta esto primero para tener los archivos):**
+```bash
+mkdir ~/lab03 && cd ~/lab03
+echo -e "servidor=produccion\npuerto=8080\ndebug=false\nversion=1.0" > config_v1.txt
+echo -e "servidor=produccion\npuerto=9090\ndebug=true\nversion=1.1" > config_v2.txt
+mkdir old_configs new_configs
+cp config_v1.txt old_configs/
+cp config_v2.txt new_configs/
+echo -e "log=habilitado\ntimeout=30" > new_configs/extra.txt
+```
+
+**Tareas:**
+
+1. Muestra el contenido completo de `config_v1.txt`.
+2. Muestra el contenido de `config_v2.txt` con números de línea.
+3. Muestra solo la **primera línea** de `config_v1.txt`.
+4. Muestra solo los primeros **10 bytes** de `config_v2.txt`.
+5. Muestra la **última línea** de cada archivo (en dos comandos).
+6. Compara `config_v1.txt` con `config_v2.txt` e interpreta la salida: ¿cuántas líneas cambiaron? ¿cuáles?
+7. Compara los directorios `old_configs/` y `new_configs/` — ¿qué archivo existe solo en uno de ellos?
+
+**Resultado esperado del paso 6:**
+```
+2c2
+< puerto=8080
+---
+> puerto=9090
+3c3
+< debug=false
+---
+> debug=true
+4c4
+< version=1.0
+---
+> version=1.1
+```
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+cat config_v1.txt
+cat -n config_v2.txt
+head -n1 config_v1.txt
+head -c10 config_v2.txt
+tail -n1 config_v1.txt
+tail -n1 config_v2.txt
+diff config_v1.txt config_v2.txt
+diff -r old_configs/ new_configs/
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -754,6 +994,14 @@ ls -la
 | `rm -r dir` | Elimina directorio y su contenido | 02 |
 | `rm -rf dir` | Elimina sin confirmación (peligroso) | 02 |
 | `rmdir dir` | Elimina directorio solo si está vacío | 02 |
+| `cat archivo` | Muestra el contenido completo de un archivo | 03 |
+| `cat -n archivo` | Muestra contenido con números de línea | 03 |
+| `head -n N archivo` | Muestra las primeras N líneas | 03 |
+| `head -c N archivo` | Muestra los primeros N bytes | 03 |
+| `tail -n N archivo` | Muestra las últimas N líneas | 03 |
+| `tail -c N archivo` | Muestra los últimos N bytes | 03 |
+| `diff arch1 arch2` | Muestra diferencias entre dos archivos | 03 |
+| `diff -r dir1 dir2` | Compara dos directorios recursivamente | 03 |
 
 ---
 
@@ -775,6 +1023,9 @@ ls -la
 | **Archivo oculto** | Archivo cuyo nombre empieza con `.` — solo visible con `ls -a` |
 | **Redirección (`>`)** | Operador que envía la salida de un comando a un archivo |
 | **Recursivo (`-r`)** | Opción que aplica la operación a un directorio y todo su contenido |
+| **Byte** | Unidad mínima de datos — un carácter de texto ocupa generalmente 1 byte |
+| **`\n`** | Salto de línea — carácter invisible que separa líneas en un archivo |
+| **`diff`** | Herramienta para ver qué cambió entre dos versiones de un archivo |
 
 ---
 
