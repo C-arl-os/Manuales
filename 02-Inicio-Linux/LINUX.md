@@ -16,6 +16,7 @@
   - [Lab 02 — Operaciones con archivos y directorios](#lab-02--operaciones-con-archivos-y-directorios)
   - [Lab 03 — Contenido y comparación de archivos](#lab-03--contenido-y-comparación-de-archivos)
   - [Lab 04 — Permisos de archivos](#lab-04--permisos-de-archivos)
+  - [Lab 05 — Gestión de cuentas de usuario](#lab-05--gestión-de-cuentas-de-usuario)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -1275,6 +1276,307 @@ ls -l proyecto/src/
 
 ---
 
+---
+
+### Lab 05 — Gestión de cuentas de usuario
+
+**Objetivo del lab:** Crear, modificar, bloquear y eliminar cuentas de usuario en Linux, y entender los archivos del sistema donde se almacena esa información.
+
+---
+
+#### Los archivos del sistema de usuarios
+
+Antes de los comandos, necesitas conocer dos archivos clave:
+
+**`/etc/passwd`** — registro de todas las cuentas del sistema
+
+```
+joker:x:5001:5001::/home/wayne:/bin/bash
+  │   │   │     │       │          └─ shell predeterminado
+  │   │   │     │       └─ directorio home
+  │   │   │     └─ GID (group ID)
+  │   │   └─ UID (user ID)
+  │   └─ 'x' indica que la contraseña está en /etc/shadow
+  └─ nombre de usuario
+```
+
+**`/etc/shadow`** — contraseñas cifradas (solo root puede leerlo)
+
+```
+joker:$y$j9T$CD2zcJH...:20539:0:99999:7:::
+  │    │                  │
+  │    │                  └─ días desde 1970-01-01 en que se cambió la contraseña
+  │    └─ hash de la contraseña (cifrado)
+  └─ nombre de usuario
+```
+
+Cuando el hash empieza con `!` significa que la cuenta está **bloqueada**.
+
+---
+
+#### `useradd` — Crear un usuario
+
+**Sintaxis:**
+```
+sudo useradd nombre
+sudo useradd -m nombre    # crea también el directorio home
+```
+
+**Sin `-m` (no crea home):**
+```bash
+$ sudo useradd joker
+$ sudo grep -w 'joker' /etc/passwd
+joker:x:5001:5001::/home/joker:/bin/sh
+```
+
+El usuario existe en el sistema pero su `/home/joker` no fue creado físicamente.
+
+**Con `-m` (crea home):**
+```bash
+$ sudo useradd -m bob
+$ sudo ls -ld /home/bob
+drwxr-x--- 2 bob bob 57 Mar 27 11:48 /home/bob
+```
+
+`-m` crea el directorio y lo llena con los archivos base de configuración.
+
+> **Diferencia importante:** En la mayoría de distros de producción se usa `-m` para que el usuario tenga su carpeta home. Sin `-m`, el usuario puede iniciar sesión pero no tendrá directorio propio.
+
+---
+
+#### `grep -w` — Buscar una palabra exacta en un archivo
+
+**Sintaxis:**
+```
+grep -w 'palabra' archivo
+```
+
+**Qué hace:** Busca líneas que contengan exactamente esa palabra (no subcadenas). Muy útil para verificar usuarios en `/etc/passwd`.
+
+```bash
+$ sudo grep -w 'joker' /etc/passwd
+joker:x:5001:5001::/home/wayne:/bin/bash
+```
+
+> `-w` es "whole word" — sin él, buscar `bob` también encontraría `bobby` o `bobcat`.
+
+---
+
+#### `passwd` — Establecer o cambiar contraseña
+
+**Sintaxis:**
+```
+sudo passwd usuario       # establece/cambia contraseña
+sudo passwd -l usuario    # lock: bloquea la cuenta
+sudo passwd -u usuario    # unlock: desbloquea la cuenta
+```
+
+**Establecer contraseña:**
+```bash
+$ sudo passwd joker
+New password:
+Retype new password:
+passwd: password updated successfully
+```
+
+La contraseña no se muestra al escribir (ni siquiera asteriscos) — eso es normal en Linux.
+
+**Bloquear cuenta:**
+```bash
+$ sudo passwd -l joker
+passwd: password expiry information changed.
+```
+
+Internamente pone un `!` delante del hash en `/etc/shadow`, lo que impide autenticarse.
+
+**Desbloquear cuenta:**
+```bash
+$ sudo passwd -u joker
+passwd: password expiry information changed.
+```
+
+Quita el `!` y la cuenta vuelve a funcionar.
+
+---
+
+#### `usermod` — Modificar propiedades de un usuario
+
+**Sintaxis:**
+```
+sudo usermod -d /nueva/ruta usuario    # cambia el home
+sudo usermod -s /bin/bash usuario      # cambia el shell
+sudo usermod -aG grupo usuario         # agrega al grupo
+```
+
+**Cambiar el directorio home:**
+```bash
+$ sudo usermod -d /home/wayne joker
+$ sudo grep -w 'joker' /etc/passwd
+joker:x:5001:5001::/home/wayne:/bin/sh
+#                   ^^^^^^^^^^^
+#                   home actualizado
+```
+
+**Cambiar el shell predeterminado:**
+```bash
+$ sudo usermod -s /bin/bash joker
+$ sudo grep -w 'joker' /etc/passwd
+joker:x:5001:5001::/home/wayne:/bin/bash
+#                               ^^^^^^^^^
+#                               shell actualizado
+```
+
+Shells comunes:
+- `/bin/sh` — shell básico (POSIX)
+- `/bin/bash` — bash, el más común en Linux
+- `/bin/zsh` — zsh, más moderno
+- `/sbin/nologin` — impide que el usuario inicie sesión (para cuentas de servicio)
+
+**Agregar a un grupo (`-aG`):**
+```bash
+$ sudo usermod -aG sudo joker
+$ groups joker
+joker : joker sudo
+```
+
+> **Crítico:** Siempre usa `-aG`, **nunca** `-G` solo.
+> `-G` reemplaza todos los grupos del usuario.
+> `-aG` **agrega** al grupo sin quitar los anteriores.
+> Usar `-G` por error puede dejar al usuario sin acceso a grupos importantes.
+
+---
+
+#### `groups` — Ver los grupos de un usuario
+
+**Sintaxis:**
+```
+groups usuario
+```
+
+```bash
+$ groups joker
+joker : joker sudo
+#        │    └─ grupo sudo (puede usar sudo)
+#        └─ grupo primario (mismo nombre que el usuario)
+```
+
+---
+
+#### `su` — Cambiar de usuario
+
+**Sintaxis:**
+```
+su - usuario     # cambia con entorno completo (recomendado)
+su usuario       # cambia sin cargar el entorno del usuario
+```
+
+```bash
+$ su - joker
+Password:
+joker@servidor:~$
+```
+
+El `-` (con espacio antes del nombre) carga el entorno completo del usuario: su home, su shell, sus variables de entorno. Es equivalente a iniciar sesión desde cero como ese usuario.
+
+**Error que cometiste:**
+```bash
+$ su -joker
+su: invalid option -- 'j'
+# ← faltó el espacio. '-joker' se interpretó como una opción '-j', no como 'usuario joker'.
+# Correcto: su - joker  (con espacio entre - y el nombre)
+```
+
+Para salir de la sesión del otro usuario:
+```bash
+joker@servidor:~$ exit
+logout
+labex:project/$
+```
+
+---
+
+#### `userdel` — Eliminar un usuario
+
+**Sintaxis:**
+```
+sudo userdel usuario        # elimina la cuenta, conserva el home
+sudo userdel -r usuario     # elimina la cuenta Y el directorio home
+```
+
+```bash
+$ sudo userdel -r bob
+userdel: bob mail spool (/var/mail/bob) not found
+```
+
+El mensaje sobre el "mail spool" es un **aviso**, no un error. Significa que no había buzón de correo para ese usuario (normal en entornos de lab). La cuenta se eliminó correctamente.
+
+**Verificación:**
+```bash
+$ sudo grep -w 'bob' /etc/passwd
+           ← sin salida = bob ya no existe en el sistema
+
+$ sudo ls -ld /home/bob
+ls: cannot access '/home/bob': No such file or directory
+           ← el directorio también fue eliminado
+```
+
+---
+
+### Ejercicio — Lab 05
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux con acceso a `sudo`.
+
+**Escenario:** Eres el administrador de un sistema Linux y necesitas preparar cuentas para dos desarrolladores nuevos: `ana` y `carlos`.
+
+**Tareas:**
+
+1. Crea el usuario `ana` **con** directorio home.
+2. Crea el usuario `carlos` **sin** directorio home y verifica que en efecto no se creó.
+3. Establece una contraseña para `ana`.
+4. Verifica el registro de `ana` en `/etc/passwd` e identifica cada campo.
+5. Cambia el shell de `carlos` a `/bin/bash`.
+6. Agrega a `ana` al grupo `sudo`.
+7. Verifica los grupos de `ana` con `groups`.
+8. Cambia al usuario `ana` con `su - ana` y ejecuta `whoami` para confirmar. Luego vuelve con `exit`.
+9. Bloquea la cuenta de `carlos` y verifica el estado.
+10. Vuelve a desbloquear la cuenta de `carlos`.
+11. Elimina el usuario `ana` junto con su directorio home. Verifica que ya no aparece en `/etc/passwd`.
+
+**Error a propósito:** Intenta `su -carlos` (sin espacio) y lee el mensaje.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+sudo useradd -m ana
+sudo useradd carlos
+sudo ls -ld /home/carlos          # debería fallar: no existe
+
+sudo passwd ana
+
+sudo grep -w 'ana' /etc/passwd
+
+sudo usermod -s /bin/bash carlos
+sudo usermod -aG sudo ana
+groups ana
+
+su - ana
+whoami
+exit
+
+sudo passwd -l carlos
+sudo grep -w 'carlos' /etc/shadow   # verás el ! al inicio del hash
+
+sudo passwd -u carlos
+
+sudo userdel -r ana
+sudo grep -w 'ana' /etc/passwd      # sin salida = eliminado
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -1319,6 +1621,18 @@ ls -l proyecto/src/
 | `chmod u+x archivo` | Agrega ejecución al dueño (notación simbólica) | 04 |
 | `chmod -R NNN dir` | Cambia permisos recursivamente | 04 |
 | `ls -ld dir` | Muestra permisos del directorio en sí | 04 |
+| `useradd nombre` | Crea un usuario sin directorio home | 05 |
+| `useradd -m nombre` | Crea un usuario con directorio home | 05 |
+| `passwd usuario` | Establece o cambia contraseña de un usuario | 05 |
+| `passwd -l usuario` | Bloquea la cuenta de un usuario | 05 |
+| `passwd -u usuario` | Desbloquea la cuenta de un usuario | 05 |
+| `usermod -d /ruta usuario` | Cambia el directorio home del usuario | 05 |
+| `usermod -s /bin/bash usuario` | Cambia el shell del usuario | 05 |
+| `usermod -aG grupo usuario` | Agrega usuario a un grupo (sin quitar otros) | 05 |
+| `groups usuario` | Muestra los grupos de un usuario | 05 |
+| `su - usuario` | Cambia a otro usuario con su entorno completo | 05 |
+| `userdel -r usuario` | Elimina usuario y su directorio home | 05 |
+| `grep -w 'texto' archivo` | Busca palabra exacta en un archivo | 05 |
 
 ---
 
@@ -1350,6 +1664,15 @@ ls -l proyecto/src/
 | **Notación numérica** | Permisos en forma de 3 dígitos, ej. `755` (r=4, w=2, x=1) |
 | **Notación simbólica** | Permisos con letras, ej. `u+x`, `g-w`, `o=r` |
 | **`./`** | Prefijo para ejecutar un archivo del directorio actual |
+| **`/etc/passwd`** | Archivo del sistema con la lista de todos los usuarios |
+| **`/etc/shadow`** | Archivo con contraseñas cifradas — solo root puede leerlo |
+| **Hash** | Contraseña transformada con criptografía — no se puede revertir directamente |
+| **`useradd`** | Comando para crear nuevos usuarios en el sistema |
+| **`usermod`** | Comando para modificar propiedades de un usuario existente |
+| **`userdel`** | Comando para eliminar un usuario del sistema |
+| **Shell predeterminado** | El intérprete que se abre cuando el usuario inicia sesión |
+| **Cuenta bloqueada** | Usuario con `!` en `/etc/shadow` — no puede autenticarse |
+| **`-aG`** | Flag de `usermod`: agrega al grupo sin reemplazar los grupos actuales |
 
 ---
 
