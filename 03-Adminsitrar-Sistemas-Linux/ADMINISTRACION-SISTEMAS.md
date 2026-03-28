@@ -12,6 +12,7 @@
 - [Labs](#labs)
   - [Lab 01 — Reconocimiento de Terreno](#lab-01--reconocimiento-de-terreno)
   - [Lab 02 — Arquitecto Digital](#lab-02--arquitecto-digital)
+  - [Lab 03 — Detective de Sistemas](#lab-03--detective-de-sistemas)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -496,6 +497,259 @@ ls
 
 ---
 
+---
+
+### Lab 03 — Detective de Sistemas
+
+**Escenario:** El Proyecto Phoenix está fallando en producción. Sarah Chen te pide que investigues los logs de error, compares las configuraciones de staging vs producción y encuentres archivos faltantes entre servidores. Tu trabajo es documentar todos los hallazgos.
+
+> Este lab introduce el flujo de trabajo de **troubleshooting sistemático**: leer logs → filtrar errores → comparar configuraciones → documentar diferencias. Es la base del trabajo diario de un sysadmin.
+
+---
+
+#### `grep` — Filtrar líneas que coinciden con un patrón
+
+**Sintaxis:**
+```
+grep "patrón" archivo
+grep -i "patrón" archivo      # ignora mayúsculas/minúsculas
+grep -n "patrón" archivo      # muestra número de línea
+grep -r "patrón" directorio   # busca en todos los archivos recursivamente
+grep -v "patrón" archivo      # muestra las líneas que NO coinciden
+```
+
+**Qué hace:** Busca líneas en un archivo que contengan el patrón indicado. Indispensable para analizar logs.
+
+**Ejemplo — extraer solo los errores de un log:**
+```bash
+$ cat ~/project/error_report.txt
+[2023-10-26 10:00:03] ERROR: Failed to process payment transaction #12345.
+[2023-10-26 10:00:05] ERROR: NullPointerException at com.innovatech.Billing.process(Billing.java:101).
+worker_processes 4;
+
+$ grep "ERROR" ~/project/error_report.txt
+[2023-10-26 10:00:03] ERROR: Failed to process payment transaction #12345.
+[2023-10-26 10:00:05] ERROR: NullPointerException at com.innovatech.Billing.process(Billing.java:101).
+```
+
+`grep` filtró solo las líneas que contienen `"ERROR"`, descartando `worker_processes 4;`.
+
+**Combinaciones frecuentes en logs:**
+```bash
+$ grep "ERROR" app.log              # solo errores
+$ grep "ERROR\|WARN" app.log        # errores y advertencias
+$ grep -i "error" app.log           # error, ERROR, Error...
+$ grep -n "ERROR" app.log           # con número de línea
+$ grep -c "ERROR" app.log           # cuántas líneas tienen ERROR (solo el conteo)
+$ grep -v "INFO" app.log            # todo excepto las líneas INFO
+```
+
+> **En producción:** Los logs de aplicaciones tienen miles de líneas. `grep` te permite ir directo al problema en segundos sin leer todo el archivo.
+
+---
+
+#### `dmesg` — Mensajes del kernel y hardware
+
+**Sintaxis:**
+```
+dmesg
+dmesg | grep "patrón"    # filtrar mensajes específicos
+dmesg | tail -20         # ver los últimos 20 mensajes
+```
+
+**Qué hace:** Muestra el buffer de mensajes del kernel — todo lo que el sistema operativo registró desde el arranque: detección de hardware, errores de dispositivos, eventos del sistema.
+
+**Ejemplo de salida:**
+```
+[    0.000000] Linux version 5.4.0-162-generic
+[    1.234567] ACPI: IRQ0 used by override.
+[  522.891234] apparmor: AppArmor initialized
+[ 1523.445678] comm="apparmor_parser"
+```
+
+**Cómo leer la salida:**
+- `[segundos.microsegundos]` → tiempo desde el arranque del sistema
+- El mensaje describe el evento del kernel
+
+**Filtrar errores de hardware:**
+```bash
+$ dmesg | grep -i "error"
+$ dmesg | grep -i "fail"
+$ dmesg | grep -i "disk\|sda\|nvme"    # problemas de disco
+```
+
+> **Cuándo usarlo:** Cuando un servidor tiene comportamiento extraño (lentitud, procesos que mueren) y no hay errores en los logs de aplicación. Los problemas de hardware o kernel aparecen aquí.
+
+---
+
+#### `diff` en contexto profesional — Comparar configuraciones entre entornos
+
+Ya conoces `diff` del manual de Linux. Aquí se usa para una tarea crítica de sysadmin: **detectar diferencias entre configuraciones de staging y producción**.
+
+**El problema típico:**
+> "La app funciona en staging pero falla en producción" → casi siempre hay una diferencia de configuración.
+
+**Comparar dos archivos de configuración:**
+```bash
+$ diff ~/project/config/staging/app.conf ~/project/config/production/app.conf
+1,5c1,5
+< # Staging Configuration
+< database.url=jdbc:mysql://staging-db:3306/nexus
+< api.key=staging_key_abc123
+< feature.flag.new_dashboard=true
+< timeout.ms=3000
+---
+> # Production Configuration
+> database.url=jdbc:mysql://prod-db:3306/nexus
+> api.key=prod_key_xyz789
+> feature.flag.new_dashboard=false
+> timeout.ms=5000
+```
+
+**Interpretación de los hallazgos:**
+- `database.url` → apunta a diferentes servidores de base de datos ✓ (esperado)
+- `api.key` → claves distintas ✓ (esperado por seguridad)
+- `feature.flag.new_dashboard=true` en staging vs `false` en producción → una feature nueva **no está activada en producción** — posible causa del fallo
+- `timeout.ms=3000` vs `5000` → producción tiene mayor tolerancia de timeout
+
+> Saber interpretar `diff` te permite identificar la causa raíz de un bug de entorno en segundos.
+
+---
+
+#### Guardar la salida de `diff` en un archivo
+
+**Patrón:**
+```
+diff archivo1 archivo2 > reporte.txt
+```
+
+En lugar de mostrar las diferencias en pantalla, las guarda en un archivo para documentar y compartir.
+
+```bash
+$ diff ~/project/config/staging/app.conf ~/project/config/production/app.conf > ~/project/config_diff.txt
+$ cat ~/project/config_diff.txt
+1,5c1,5
+< # Staging Configuration
+...
+```
+
+> **En producción:** Generar reportes con `diff > archivo.txt` es la forma estándar de documentar hallazgos antes de reportarlos al equipo o abrir un ticket.
+
+---
+
+#### `diff` vs `diff -r` — Comparar directorios (revisitado)
+
+En el Lab 03 del manual de Linux ya viste `diff -r`. Aquí se muestra la diferencia entre usarlo **sin** y **con** `-r` sobre directorios:
+
+**Sin `-r` (no recursivo):**
+```bash
+$ diff server1_files server2_files > missing_files.txt
+$ cat missing_files.txt
+Only in server1_files: asset2.js
+```
+
+Solo detecta archivos en el nivel superior del directorio.
+
+**Con `-r` (recursivo):**
+```bash
+$ diff -r server1_files server2_files > missing_files.txt
+$ cat missing_files.txt
+Only in server1_files: asset2.js
+```
+
+En este caso el resultado fue el mismo porque los directorios solo tenían un nivel. Pero si hubiera subdirectorios, `-r` los habría revisado también.
+
+> **Regla:** En servidores de producción, siempre usa `diff -r` para comparar directorios. Sin `-r`, podrías perderte archivos faltantes en subdirectorios.
+
+---
+
+#### El flujo completo de troubleshooting
+
+Este lab introduce el patrón que usarás en producción:
+
+```
+1. cat log.txt              → leer el log completo para entender el contexto
+2. grep "ERROR" log.txt     → filtrar solo lo relevante
+3. dmesg | grep "fail"      → revisar si hay problemas de hardware/kernel
+4. diff staging prod        → comparar configuraciones entre entornos
+5. diff -r servidor1 servidor2 → encontrar archivos faltantes
+6. diff ... > reporte.txt   → documentar hallazgos para el equipo
+```
+
+---
+
+### Ejercicio — Lab 03
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux.
+
+**Escenario:** Recibes un reporte de que la app de pagos falla en producción. Debes investigar los logs y comparar las configuraciones.
+
+**Preparación:**
+```bash
+mkdir -p ~/lab03/{logs,config/{staging,prod},servidores/{web1,web2}}
+
+cat > ~/lab03/logs/app.log << 'EOF'
+[2024-01-15 08:00:01] INFO: Server started on port 8080
+[2024-01-15 08:01:22] INFO: User login: admin
+[2024-01-15 08:02:45] ERROR: Database connection timeout
+[2024-01-15 08:02:46] ERROR: Failed to process order #9981
+[2024-01-15 08:03:10] WARN: Retry attempt 1 of 3
+[2024-01-15 08:03:15] ERROR: Max retries exceeded, order failed
+[2024-01-15 08:04:00] INFO: Health check OK
+EOF
+
+cat > ~/lab03/config/staging/app.conf << 'EOF'
+db.host=staging-db
+db.port=5432
+debug=true
+max_connections=10
+timeout=3000
+EOF
+
+cat > ~/lab03/config/prod/app.conf << 'EOF'
+db.host=prod-db
+db.port=5432
+debug=false
+max_connections=50
+timeout=3000
+EOF
+
+touch ~/lab03/servidores/web1/index.html ~/lab03/servidores/web1/styles.css ~/lab03/servidores/web1/deploy.sh
+touch ~/lab03/servidores/web2/index.html ~/lab03/servidores/web2/styles.css
+```
+
+**Tareas:**
+
+1. Lee el archivo de log completo con `cat`.
+2. Filtra solo las líneas de `ERROR` del log.
+3. Cuenta cuántas líneas de ERROR hay (usa `-c`).
+4. Muestra todas las líneas que **no** sean `INFO`.
+5. Compara las configuraciones de staging y producción. ¿Qué diferencias encuentras? ¿Alguna podría causar el fallo?
+6. Guarda esa comparación en `~/lab03/config_diff.txt`.
+7. Compara los directorios `web1` y `web2` para encontrar qué archivo falta en web2.
+8. Guarda ese resultado en `~/lab03/archivos_faltantes.txt`.
+9. Verifica ambos reportes con `cat`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+cat ~/lab03/logs/app.log
+grep "ERROR" ~/lab03/logs/app.log
+grep -c "ERROR" ~/lab03/logs/app.log
+grep -v "INFO" ~/lab03/logs/app.log
+diff ~/lab03/config/staging/app.conf ~/lab03/config/prod/app.conf
+diff ~/lab03/config/staging/app.conf ~/lab03/config/prod/app.conf > ~/lab03/config_diff.txt
+diff -r ~/lab03/servidores/web1 ~/lab03/servidores/web2
+diff -r ~/lab03/servidores/web1 ~/lab03/servidores/web2 > ~/lab03/archivos_faltantes.txt
+cat ~/lab03/config_diff.txt
+cat ~/lab03/archivos_faltantes.txt
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -511,6 +765,15 @@ ls
 | `tar -czf arch.tar.gz archivos` | Empaqueta y comprime archivos | 02 |
 | `tar -tzf arch.tar.gz` | Lista contenido del tar sin extraer | 02 |
 | `tar -xzf arch.tar.gz` | Extrae un archivo tar comprimido | 02 |
+| `grep "patrón" archivo` | Filtra líneas que contienen el patrón | 03 |
+| `grep -i` | Búsqueda sin distinguir mayúsculas/minúsculas | 03 |
+| `grep -n` | Muestra número de línea de cada coincidencia | 03 |
+| `grep -c` | Cuenta cuántas líneas coinciden | 03 |
+| `grep -v` | Muestra líneas que NO coinciden | 03 |
+| `grep -r "patrón" dir` | Busca en todos los archivos de un directorio | 03 |
+| `dmesg` | Mensajes del kernel desde el arranque | 03 |
+| `dmesg \| grep "error"` | Filtra mensajes del kernel con errores | 03 |
+| `diff f1 f2 > reporte.txt` | Guarda diferencias en un archivo | 03 |
 
 ---
 
@@ -538,6 +801,12 @@ ls
 | **Rotación de logs** | Práctica de archivar logs antiguos y borrar originales para liberar disco |
 | **`-czf`** | Flags de tar: Create + gZip + Filename (para crear un comprimido) |
 | **`-tzf`** | Flags de tar: lisT + gZip + Filename (para ver contenido sin extraer) |
+| **`grep`** | Global Regular Expression Print — filtra líneas por patrón de texto |
+| **`dmesg`** | Diagnostic Messages — buffer de mensajes del kernel |
+| **Troubleshooting** | Proceso sistemático para identificar y resolver fallos en un sistema |
+| **Staging** | Entorno de prueba que replica producción — donde se prueba antes de desplegar |
+| **Producción** | Entorno real donde corre la aplicación para los usuarios finales |
+| **`\|` (pipe)** | Operador que pasa la salida de un comando como entrada al siguiente |
 
 ---
 
