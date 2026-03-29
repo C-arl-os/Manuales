@@ -14,6 +14,7 @@
   - [Lab 02 — Arquitecto Digital](#lab-02--arquitecto-digital)
   - [Lab 03 — Detective de Sistemas](#lab-03--detective-de-sistemas)
   - [Lab 04 — Guardián de la Fortaleza](#lab-04--guardián-de-la-fortaleza)
+  - [Lab 05 — Guardián de las Llaves](#lab-05--guardián-de-las-llaves)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -965,6 +966,230 @@ exit
 
 ---
 
+---
+
+### Lab 05 — Guardián de las Llaves
+
+**Escenario:** Última semana. El Proyecto Phoenix entra a su fase final. Necesitas incorporar a una desarrolladora senior nueva (`b.smith`), darle acceso al equipo, y bloquear la cuenta de un empleado que se va (`j.doe`) sin eliminar sus archivos, que el equipo legal necesita para una auditoría.
+
+---
+
+#### Convenciones de nombres de usuario
+
+En entornos corporativos los usuarios no se llaman `labex` ni `bob`. El formato estándar es `inicial.apellido` o `nombre.apellido`:
+
+```
+b.smith   → Brenda Smith
+j.doe     → John Doe
+a.garcia  → Ana García
+```
+
+Linux acepta el punto `.` en nombres de usuario. No cambia nada técnico, solo sigue la convención de la empresa.
+
+---
+
+#### `useradd -m` — Crear usuario con directorio home
+
+Ya lo conoces. Aquí el detalle importante es verificar que el home se creó:
+
+```bash
+$ sudo useradd -m b.smith
+$ ls -la /home/
+drwxr-x--- 2 b.smith b.smith 57 Mar 29  /home/b.smith
+```
+
+Cuando Linux crea el home con `-m`, lo llena automáticamente con archivos de configuración base:
+
+```bash
+$ sudo ls -la /home/b.smith/
+.bash_logout
+.bashrc
+.profile
+```
+
+Estos archivos configuran el entorno del usuario cuando inicia sesión (variables de entorno, alias, mensaje de bienvenida, etc.).
+
+---
+
+#### `grep` con anclas `^` — Buscar exactamente al inicio de línea
+
+**Sintaxis:**
+```
+grep "^patron" archivo
+```
+
+El símbolo `^` significa "inicio de línea". Úsalo cuando quieres encontrar una línea que **empieza** con ese texto, no que lo contiene en cualquier parte.
+
+**Por qué importa en `/etc/passwd` y `/etc/shadow`:**
+
+Sin ancla, `grep "j.doe"` también encontraría líneas como:
+```
+ajdoelen:x:1005:...
+backupj.doe:x:1006:...
+```
+
+Con ancla `^`:
+```bash
+$ grep "^j.doe:" /etc/shadow
+j.doe:!:20334:0:99999:7:::
+```
+
+Solo devuelve la línea que empieza exactamente con `j.doe:`.
+
+> El `:` después del nombre también es importante. Sin él, `^j` encontraría tanto `j.doe` como `j.smith`.
+
+---
+
+#### `passwd` — Administrar contraseñas (revisitado)
+
+Ya viste `passwd` en el manual de Linux. El punto clave aquí:
+
+```bash
+$ passwd b.smith
+passwd: You may not view or modify password information for b.smith.
+
+$ sudo passwd b.smith
+New password:
+Retype new password:
+passwd: password updated successfully
+```
+
+`passwd` sin `sudo` solo funciona para cambiar **tu propia contraseña**. Para cambiar la de otro usuario, siempre se necesita `sudo`.
+
+---
+
+#### `usermod -aG` — Agregar al grupo sin romper membresías
+
+Ya lo viste en el Lab 05 del manual de Linux. Aquí el recordatorio en contexto corporativo:
+
+```bash
+$ sudo usermod -aG developers b.smith
+$ groups b.smith
+b.smith : b.smith developers
+```
+
+**La diferencia crítica:**
+
+```bash
+$ sudo usermod -G developers b.smith    # PELIGROSO: reemplaza TODOS los grupos
+$ sudo usermod -aG developers b.smith   # CORRECTO: agrega sin tocar los demás
+```
+
+Si `b.smith` ya era miembro de `sudo` o `docker` y usas `-G` sin `-a`, pierde esos grupos al instante. En producción esto puede dejar a un usuario sin acceso a herramientas críticas.
+
+---
+
+#### `usermod -L` — Bloquear una cuenta
+
+**Sintaxis:**
+```
+sudo usermod -L usuario
+sudo passwd -l usuario    # alternativa equivalente
+```
+
+Ambos hacen lo mismo: ponen un `!` al inicio del hash en `/etc/shadow`.
+
+```bash
+$ sudo usermod -L j.doe
+```
+
+**Verificar que la cuenta está bloqueada:**
+```bash
+$ sudo grep "^j.doe:" /etc/shadow
+j.doe:!$y$j9T$...:20334:0:99999:7:::
+       ^
+       └─ el '!' indica cuenta bloqueada
+```
+
+**Lo que hace el `!` internamente:**
+- El hash original sigue ahí, intacto, después del `!`
+- Linux detecta el `!` al inicio y rechaza cualquier intento de autenticación
+- Si se desbloquea con `usermod -U` o `passwd -u`, el `!` se quita y la contraseña vuelve a funcionar
+
+> Bloquear en lugar de eliminar es la práctica correcta cuando hay auditorías pendientes. Los archivos, logs y permisos del usuario se conservan para revisión legal o forense.
+
+---
+
+#### Errores frecuentes en este lab
+
+**Crear usuario sin `-m` y darse cuenta después:**
+
+Opciones:
+
+```bash
+# Opción 1: eliminar y recrear correctamente
+sudo userdel b.smith
+sudo useradd -m b.smith
+
+# Opción 2: crear el home manualmente (más avanzado)
+sudo mkdir /home/b.smith
+sudo chown b.smith:b.smith /home/b.smith
+sudo chmod 750 /home/b.smith
+```
+
+**`grep` sin ancla devuelve resultados inesperados:**
+
+```bash
+sudo grep "j.doe" /etc/shadow
+# podría devolver: ajdoe_backup, old_j.doe, etc.
+
+sudo grep "^j.doe:" /etc/shadow
+# exacto: solo la cuenta j.doe
+```
+
+**`usermod -G` sin `-a` (el error más peligroso de este lab):**
+
+Si ejecutas `usermod -G developers b.smith` sin la `-a`, b.smith queda solo en `developers` y pierde todos sus demás grupos. Para corregir hay que agregarlos uno a uno de nuevo.
+
+---
+
+### Ejercicio — Lab 05
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux con `sudo`.
+
+**Escenario:** Primer día como sysadmin en una empresa nueva. Debes incorporar a dos desarrolladores, darles acceso al grupo del proyecto, y bloquear la cuenta de alguien que ya no trabaja ahí.
+
+**Preparación:**
+```bash
+sudo groupadd dev_team
+sudo useradd -m j.williams
+sudo passwd j.williams    # establece contraseña: password123
+sudo usermod -aG dev_team j.williams
+```
+
+**Tareas:**
+
+1. Crea el usuario `m.torres` con directorio home.
+2. Verifica que aparece en `/etc/passwd` buscando exactamente `^m.torres:`.
+3. Verifica que su home fue creado en `/home/`.
+4. Establece una contraseña para `m.torres` (necesitas `sudo`).
+5. Agrégalo al grupo `dev_team` sin eliminar sus grupos actuales.
+6. Verifica sus grupos con `groups m.torres`.
+7. Confirma con `id m.torres` que aparece el GID de `dev_team`.
+8. Bloquea la cuenta de `j.williams` (se fue de la empresa).
+9. Verifica en `/etc/shadow` que el `!` aparece al inicio del hash de `j.williams`.
+10. Confirma que `m.torres` sigue activo (sin `!` en su hash).
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+sudo useradd -m m.torres
+sudo grep "^m.torres:" /etc/passwd
+ls -la /home/ | grep m.torres
+sudo passwd m.torres
+sudo usermod -aG dev_team m.torres
+groups m.torres
+id m.torres
+sudo usermod -L j.williams
+sudo grep "^j.williams:" /etc/shadow
+sudo grep "^m.torres:" /etc/shadow
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -992,6 +1217,12 @@ exit
 | `sudo chmod 750 dir` | Permisos privados de equipo (rwxr-x---) | 04 |
 | `sudo chmod g+s dir` | Activa setgid en un directorio (simbólico) | 04 |
 | `sudo chmod 2770 dir` | Setgid + rwx para dueño y grupo (numérico) | 04 |
+| `sudo useradd -m usuario` | Crea usuario con home directory | 05 |
+| `sudo passwd usuario` | Establece contraseña de otro usuario | 05 |
+| `sudo usermod -aG grupo usuario` | Agrega a grupo sin eliminar membresías | 05 |
+| `sudo usermod -L usuario` | Bloquea la cuenta de un usuario | 05 |
+| `sudo usermod -U usuario` | Desbloquea la cuenta de un usuario | 05 |
+| `grep "^usuario:" archivo` | Busca línea que empieza exactamente con ese texto | 05 |
 
 ---
 
@@ -1030,7 +1261,69 @@ exit
 | **`S` mayúscula** | En `ls -l`: setgid activo pero sin permiso de ejecución — casi siempre un error |
 | **Bits especiales** | Permisos adicionales de Linux: setuid(4), setgid(2), sticky(1) |
 | **`2xxx`** | Notación numérica con setgid — el `2` va delante de los 3 dígitos normales |
+| **Ancla `^`** | En grep: obliga a que el patrón coincida desde el inicio de la línea |
+| **Cuenta bloqueada** | Usuario con `!` al inicio del hash en `/etc/shadow` — no puede autenticarse |
+| **`-aG`** | Append + Groups: agrega grupo sin reemplazar los existentes |
 
 ---
 
-_Última actualización: 2026-03-26_
+## Errores Humanos Frecuentes
+
+Esta sección recopila los errores más comunes al administrar sistemas Linux. No son errores de sintaxis — son decisiones que parecen correctas pero tienen consecuencias graves.
+
+---
+
+### Permisos y propiedad
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| `chmod -G grupo user` | Elimina **todos** los grupos del usuario, solo queda el nuevo | `chmod -aG grupo user` |
+| `chmod 777 directorio` | Cualquier usuario del sistema puede leer, escribir y ejecutar | Usar `755` o `750` según el caso |
+| `chmod -R 777 /` | Destruye los permisos de todo el sistema operativo | Nunca usar `-R` en rutas raíz |
+| `chown -R root /home/user` | El usuario pierde acceso a su propio home | Especificar siempre la ruta completa y verificar antes |
+
+---
+
+### Archivos y directorios
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| `rm -rf /directorio /` | El espacio entre la ruta y `/` borra el sistema de archivos raíz | Verificar el comando antes de ejecutar con `echo rm -rf ...` |
+| `cmd > archivo` cuando se quería `>>` | Sobreescribe y borra todo el contenido anterior | Usar `>>` para acumular, `>` solo cuando quieres empezar limpio |
+| `tar -xzf archivo.tar.gz` sin verificar destino | Extrae archivos sobre el directorio actual, puede sobrescribir archivos existentes | Extraer en un directorio temporal primero: `tar -xzf archivo.tar.gz -C /tmp/prueba/` |
+| Borrar originales antes de verificar el tar | Si el tar estaba incompleto o corrupto, los datos se pierden | Siempre `tar -tzf archivo.tar.gz` antes de `rm` |
+
+---
+
+### Usuarios y autenticación
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| `useradd user` sin `-m` | El usuario existe pero no tiene home — no puede guardar archivos ni configs | `useradd -m user` o crear el home manualmente después |
+| `usermod -G grupo user` sin `-a` | El usuario pierde todos sus grupos anteriores | Siempre `usermod -aG grupo user` |
+| `userdel user` sin `-r` cuando se quería limpiar todo | El home queda huérfano ocupando espacio | `userdel -r user` para eliminar usuario y home juntos |
+| `su -usuario` (sin espacio) | Error: `invalid option` — el `-` se interpreta como flag | `su - usuario` con espacio entre el guión y el nombre |
+| `passwd user` sin `sudo` | Solo cambia tu propia contraseña, falla silenciosamente o da error | `sudo passwd user` para cambiar la de otro usuario |
+
+---
+
+### grep y búsquedas
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| `grep "user" /etc/passwd` | Puede devolver líneas de otros usuarios que contienen "user" en cualquier campo | `grep "^user:" /etc/passwd` para buscar exactamente ese usuario |
+| `grep "ERROR" log.txt` con mayúsculas fijas | Se pierden errores escritos como `error` o `Error` | `grep -i "error" log.txt` para búsqueda sin distinción de caso |
+| `diff archivo1 archivo2` con el orden invertido | Los símbolos `<` y `>` quedan al revés, confunde la interpretación | Convención: siempre `diff original modificado` o `diff staging produccion` |
+
+---
+
+### Comandos con `sudo`
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| Ejecutar `sudo` sin entender el comando | Puede modificar archivos del sistema sin posibilidad de revertir | Siempre prueba el comando sin `sudo` primero para ver qué haría |
+| `sudo !!` sin revisar el historial | Ejecuta como root el último comando, que puede no ser lo que esperas | Revisar con `history` antes de usar `!!` |
+
+---
+
+_Última actualización: 2026-03-28_
