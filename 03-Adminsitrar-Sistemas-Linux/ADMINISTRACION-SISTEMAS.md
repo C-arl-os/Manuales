@@ -13,6 +13,7 @@
   - [Lab 01 — Reconocimiento de Terreno](#lab-01--reconocimiento-de-terreno)
   - [Lab 02 — Arquitecto Digital](#lab-02--arquitecto-digital)
   - [Lab 03 — Detective de Sistemas](#lab-03--detective-de-sistemas)
+  - [Lab 04 — Guardián de la Fortaleza](#lab-04--guardián-de-la-fortaleza)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -750,6 +751,220 @@ cat ~/lab03/archivos_faltantes.txt
 
 ---
 
+---
+
+### Lab 04 — Guardián de la Fortaleza
+
+**Escenario:** El CTO de TechNova te encarga asegurar el directorio del Proyecto Phoenix. Necesitas aplicar permisos precisos: proteger archivos sensibles, dar acceso controlado al equipo de desarrollo, y configurar el directorio `src` para que cualquier archivo creado dentro herede automáticamente el grupo del equipo.
+
+> Este lab introduce los **bits de permiso especiales** de Linux — un nivel más allá de `rwx` estándar. El más importante para trabajo en equipo es el **setgid**.
+
+---
+
+#### Por qué `chmod` falló sin `sudo`
+
+```bash
+$ chmod -R 730 phoenix_project
+chmod: changing permissions of 'phoenix_project': Operation not permitted
+```
+
+`chmod` solo puede cambiare los permisos de archivos que **te pertenecen**. El directorio `phoenix_project` pertenece a `dev_lead`, no a `labex`. Por eso se necesita `sudo`.
+
+```bash
+$ sudo chmod 730 phoenix_project    # ahora sí funciona
+```
+
+> **Regla:** Sin `sudo`, solo puedes modificar permisos de lo que tú creaste. Con `sudo`, actúas como root y puedes modificar cualquier cosa.
+
+---
+
+#### Repaso de permisos numéricos aplicados al lab
+
+**Intento con `730`:**
+```
+7  3  0
+│  │  └─ otros: --- (sin acceso)
+│  └─ grupo: -wx (puede escribir y ejecutar, pero no leer) ← raro, casi nunca se usa
+└─ dueño: rwx (acceso total)
+```
+
+`730` es inusual porque da al grupo escritura sin lectura. Se corrigió a `750`:
+
+**Corrección con `750`:**
+```
+7  5  0
+│  │  └─ otros: --- (sin acceso, correcto para datos privados)
+│  └─ grupo: r-x (puede leer y entrar al directorio)
+└─ dueño: rwx (acceso total)
+```
+
+```bash
+$ sudo chmod 750 phoenix_project
+$ ls -l
+drwxr-x--- 4 dev_lead developers 53 Mar 29 12:44 phoenix_project
+```
+
+`750` es el permiso estándar para **directorios de proyecto privado de equipo**: el dueño tiene control total, el grupo puede trabajar, nadie más entra.
+
+---
+
+#### Los bits especiales de permisos
+
+Además de `rwx`, Linux tiene tres bits especiales que se colocan **delante** del número de tres dígitos:
+
+| Bit | Valor | Nombre | Se activa con |
+|-----|-------|--------|---------------|
+| setuid | 4 | Set User ID | `u+s` o `4xxx` |
+| **setgid** | **2** | **Set Group ID** | **`g+s` o `2xxx`** |
+| sticky | 1 | Sticky bit | `+t` o `1xxx` |
+
+En este lab se usó el **setgid**.
+
+---
+
+#### `chmod g+s` / `chmod 2xxx` — El bit setgid
+
+**¿Qué hace el setgid en un directorio?**
+
+Normalmente, cuando un usuario crea un archivo, el archivo hereda el **grupo principal del usuario**. Con setgid activado en un directorio, todos los archivos nuevos creados dentro heredan el **grupo del directorio**, no el del usuario.
+
+**Sin setgid:**
+```
+usuario labex (grupo principal: labex) crea archivo en src/
+→ archivo queda con grupo: labex
+```
+
+**Con setgid en src/:**
+```
+usuario labex (grupo principal: labex) crea archivo en src/
+→ archivo queda con grupo: developers  ← hereda el grupo del directorio
+```
+
+**Cómo se aplica:**
+
+Con notación simbólica:
+```bash
+$ sudo chmod g+s phoenix_project/src
+```
+
+Con notación numérica (el `2` delante es el setgid):
+```bash
+$ sudo chmod 2770 phoenix_project/src
+# 2 = setgid
+# 7 = rwx para el dueño
+# 7 = rwx para el grupo
+# 0 = --- para otros
+```
+
+**Cómo reconocer el setgid en `ls -l`:**
+
+```bash
+$ ls -ld phoenix_project/src
+drwxrws--- 2 dev_lead developers 6 Mar 29 12:40 phoenix_project/src
+#      ^
+#      └─ 's' minúscula en posición de ejecución del grupo = setgid activo + grupo tiene ejecución
+```
+
+| Lo que ves | Significado |
+|-----------|-------------|
+| `s` minúscula | setgid activo, el grupo **tiene** permiso de ejecución (`x`) |
+| `S` mayúscula | setgid activo, el grupo **no tiene** permiso de ejecución (raro, casi siempre es un error) |
+
+**Verificar que funciona — el archivo nuevo hereda el grupo:**
+```bash
+$ touch phoenix_project/src/test.txt
+$ ls -l phoenix_project/src/test.txt
+-rw-rw-r-- 1 labex developers 0 Mar 29 12:58 phoenix_project/src/test.txt
+#                   ^^^^^^^^^^
+#                   └─ grupo 'developers', no 'labex' — setgid funcionó
+```
+
+---
+
+#### Por qué setgid es esencial en trabajo colaborativo
+
+Sin setgid, en un directorio compartido por equipo:
+- Ana crea `feature.py` → grupo: `ana` → Carlos no puede editarlo
+- Carlos crea `utils.py` → grupo: `carlos` → Ana no puede editarlo
+- El trabajo en equipo se fragmenta
+
+Con setgid en el directorio:
+- Ana crea `feature.py` → grupo: `developers` → Carlos puede editarlo
+- Carlos crea `utils.py` → grupo: `developers` → Ana puede editarlo
+- El equipo colabora sin fricción
+
+> **Setgid en `src/` es el estándar** para directorios de código compartido en equipos Linux. Lo verás en casi todo servidor de desarrollo con múltiples usuarios.
+
+---
+
+#### Resumen de permisos aplicados al Proyecto Phoenix
+
+| Archivo/Directorio | Permisos | Significado |
+|-------------------|----------|-------------|
+| `phoenix_project/` | `750` (`drwxr-x---`) | Dueño: control total. Grupo: leer+entrar. Otros: sin acceso |
+| `phoenix_project/src/` | `2770` (`drwxrws---`) | Igual que arriba + setgid: nuevos archivos heredan grupo |
+| `project_keys.txt` | `600` (`-rw-------`) | Solo el dueño puede leer/escribir. Nadie más ve nada |
+
+---
+
+### Ejercicio — Lab 04
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux con `sudo`.
+
+**Escenario:** Configuras un servidor para el equipo de diseño. Hay un directorio compartido donde todos deben poder crear y editar archivos, y un directorio privado con credenciales que solo el líder puede ver.
+
+**Preparación:**
+```bash
+sudo groupadd designers
+sudo useradd -m -G designers alice
+sudo useradd -m -G designers bob
+mkdir -p ~/lab04/{compartido,privado}
+touch ~/lab04/privado/api_credentials.txt
+sudo chown -R alice:designers ~/lab04
+```
+
+**Tareas:**
+
+1. Lista `~/lab04` con permisos detallados para ver el estado inicial.
+2. Aplica `750` al directorio `lab04/` (dueño todo, grupo lee/entra, otros nada).
+3. Aplica `700` a `privado/` (solo alice puede entrar).
+4. Aplica `600` a `privado/api_credentials.txt` (solo alice lee/escribe).
+5. Aplica `2770` a `compartido/` (equipo colabora + setgid).
+6. Verifica con `ls -ld compartido/` — busca la `s` en la posición del grupo.
+7. Cambia a alice con `su - alice`, entra a `compartido/` y crea `diseño.txt`.
+8. Verifica con `ls -l compartido/diseño.txt` — ¿el grupo es `designers`?
+9. Sal con `exit`.
+
+**Resultado esperado:**
+```
+drwxrws--- alice designers compartido/   ← 's' indica setgid
+-rw-rw---- alice designers diseño.txt    ← heredó el grupo automáticamente
+drwx------ alice designers privado/
+-rw------- alice designers api_credentials.txt
+```
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+ls -la ~/lab04
+sudo chmod 750 ~/lab04
+sudo chmod 700 ~/lab04/privado
+sudo chmod 600 ~/lab04/privado/api_credentials.txt
+sudo chmod 2770 ~/lab04/compartido
+ls -ld ~/lab04/compartido    # busca la 's'
+
+su - alice
+cd ~/lab04/compartido        # rutas variarán según tu sistema
+touch diseño.txt
+ls -l diseño.txt             # grupo debe ser 'designers'
+exit
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -774,6 +989,9 @@ cat ~/lab03/archivos_faltantes.txt
 | `dmesg` | Mensajes del kernel desde el arranque | 03 |
 | `dmesg \| grep "error"` | Filtra mensajes del kernel con errores | 03 |
 | `diff f1 f2 > reporte.txt` | Guarda diferencias en un archivo | 03 |
+| `sudo chmod 750 dir` | Permisos privados de equipo (rwxr-x---) | 04 |
+| `sudo chmod g+s dir` | Activa setgid en un directorio (simbólico) | 04 |
+| `sudo chmod 2770 dir` | Setgid + rwx para dueño y grupo (numérico) | 04 |
 
 ---
 
@@ -807,6 +1025,11 @@ cat ~/lab03/archivos_faltantes.txt
 | **Staging** | Entorno de prueba que replica producción — donde se prueba antes de desplegar |
 | **Producción** | Entorno real donde corre la aplicación para los usuarios finales |
 | **`\|` (pipe)** | Operador que pasa la salida de un comando como entrada al siguiente |
+| **Setgid** | Set Group ID — bit especial que hace que nuevos archivos hereden el grupo del directorio |
+| **`s` minúscula** | En `ls -l`: setgid (o setuid) activo y el permiso de ejecución también está activo |
+| **`S` mayúscula** | En `ls -l`: setgid activo pero sin permiso de ejecución — casi siempre un error |
+| **Bits especiales** | Permisos adicionales de Linux: setuid(4), setgid(2), sticky(1) |
+| **`2xxx`** | Notación numérica con setgid — el `2` va delante de los 3 dígitos normales |
 
 ---
 
