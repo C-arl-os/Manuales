@@ -15,6 +15,7 @@
   - [Lab 03 — Detective de Sistemas](#lab-03--detective-de-sistemas)
   - [Lab 04 — Guardián de la Fortaleza](#lab-04--guardián-de-la-fortaleza)
   - [Lab 05 — Guardián de las Llaves](#lab-05--guardián-de-las-llaves)
+  - [Lab 06 — Gestión de Procesos](#lab-06--gestión-de-procesos)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -1190,6 +1191,340 @@ sudo grep "^m.torres:" /etc/shadow
 
 ---
 
+---
+
+### Lab 06 — Gestión de Procesos
+
+**Escenario:** El servidor del Proyecto Phoenix está lento. El load average en `top` muestra 1.14 con una CPU al 100% consumida por `resource_hog.sh`. Necesitas identificar el proceso, terminarlo, y luego lanzar una tarea legítima en segundo plano que siga corriendo aunque cierres la sesión.
+
+---
+
+#### `ps` — Listar procesos en ejecución
+
+**Sintaxis:**
+```
+ps              # procesos de tu terminal actual
+ps -x           # todos tus procesos, con o sin terminal
+ps -u           # tus procesos con %CPU y %MEM
+ps aux          # TODOS los procesos del sistema (el más usado)
+ps -p PID -o columnas   # info específica de un PID
+```
+
+**`ps` básico — solo tu terminal:**
+```bash
+$ ps
+    PID TTY          TIME CMD
+    338 pts/2    00:00:00 script
+    407 pts/3    00:00:00 ps
+```
+
+Muestra solo los procesos conectados a tu terminal actual. Útil para ver qué corre en esta sesión.
+
+---
+
+**`ps -x` — todos tus procesos:**
+```bash
+$ ps -x
+    PID TTY      STAT   TIME COMMAND
+     24 ?        Ss     0:00 /usr/bin/perl /usr/bin/vncserver ...
+    201 ?        R      1:42 /bin/bash /home/labex/project/resource_hog.sh
+    202 ?        S      0:00 /bin/bash /home/labex/project/critical_service.sh
+```
+
+La `?` en TTY significa que el proceso no está conectado a ninguna terminal — corre en segundo plano.
+
+**La columna STAT — estado del proceso:**
+
+| Estado | Significado |
+|--------|-------------|
+| `R` | Running — ejecutando activamente en CPU |
+| `S` | Sleeping — dormido, esperando algo |
+| `D` | Uninterruptible sleep — esperando I/O de disco |
+| `Z` | Zombie — terminó pero el padre no lo recogió |
+| `T` | Stopped — pausado con Ctrl+Z |
+| `s` | Session leader — líder de una sesión de procesos |
+| `l` | Multi-threaded |
+| `+` | En el grupo de procesos del foreground |
+| `N` | Baja prioridad (nice) |
+
+---
+
+**`ps -u` — procesos con uso de recursos:**
+```bash
+$ ps -u
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+labex        232  0.6  0.0   7632  6068 pts/1    Ss   11:16   0:00 -zsh
+labex        338  0.0  0.0   2800  1124 pts/2    R+   11:16   0:00 script
+```
+
+Agrega las columnas `%CPU`, `%MEM`, `VSZ` (memoria virtual) y `RSS` (memoria física real usada).
+
+---
+
+**`ps aux` — todos los procesos del sistema:**
+```bash
+$ ps aux
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.0  11204  3828 ?        Ss   11:00   0:00 init.sh
+labex        201  100  0.0   4356  1524 ?        R    11:16   4:29 resource_hog.sh
+labex        202  0.0  0.0   4200  1100 ?        S    11:16   0:00 critical_service.sh
+```
+
+`aux` combina:
+- `a` → procesos de todos los usuarios
+- `u` → formato con usuario y recursos
+- `x` → incluye procesos sin terminal
+
+> `ps aux` es el comando más usado en producción para ver el estado completo del sistema en un momento dado.
+
+---
+
+**`ps -p PID -o` — información específica de un proceso:**
+```bash
+$ ps -p 201 -o pid,ppid,cmd
+    PID    PPID CMD
+    201       1 /bin/bash /home/labex/project/resource_hog.sh
+```
+
+`-o` permite elegir exactamente qué columnas mostrar. Aquí:
+- `pid` → ID del proceso
+- `ppid` → ID del proceso padre (quién lo lanzó)
+- `cmd` → comando completo con ruta
+
+---
+
+#### `pgrep` — Encontrar PID por nombre
+
+**Sintaxis:**
+```
+pgrep nombre_proceso
+pgrep -f "patrón en línea completa"
+```
+
+**Qué hace:** Busca procesos por nombre y devuelve solo el PID. Más directo que `ps aux | grep`.
+
+```bash
+$ pgrep resource_hog.sh
+201
+```
+
+**Con `-f` — busca en la línea de comando completa:**
+```bash
+$ pgrep -f "resource_hog"
+201
+```
+
+Útil cuando el nombre del proceso es un script largo o cuando el nombre exacto no coincide con lo que muestra `ps`.
+
+**Error del lab — nombre incorrecto:**
+```bash
+$ pgrep critical_services.sh
+           ← sin salida: el proceso se llama critical_service.sh (sin 's')
+```
+
+Si `pgrep` no devuelve nada, el proceso no existe o el nombre está mal escrito. Verifica con `ps aux | grep nombre`.
+
+---
+
+#### `pkill` — Terminar procesos por nombre
+
+**Sintaxis:**
+```
+pkill nombre_proceso
+pkill -9 nombre_proceso    # forzado, sin posibilidad de limpieza
+pkill -f "patrón"          # por línea de comando completa
+```
+
+**Qué hace:** Envía una señal de terminación a todos los procesos que coincidan con el nombre.
+
+```bash
+$ pkill resource_hog.sh
+```
+
+El proceso desaparece. `top` mostrará que el CPU vuelve a niveles normales.
+
+**Señales principales:**
+
+| Señal | Número | Comportamiento |
+|-------|--------|----------------|
+| `SIGTERM` | 15 | Pide al proceso que termine limpiamente (por defecto) |
+| `SIGKILL` | 9 | Mata el proceso inmediatamente, sin limpieza |
+| `SIGHUP` | 1 | Recarga la configuración (en daemons) |
+
+> Usar siempre `SIGTERM` primero. Si el proceso no responde, entonces `SIGKILL` con `-9`. Matar con `-9` directamente puede dejar archivos a medias o corromper datos.
+
+**Diferencia entre `pkill` y `kill`:**
+
+| Comando | Forma de identificar el proceso |
+|---------|--------------------------------|
+| `kill PID` | Por número de proceso |
+| `pkill nombre` | Por nombre (afecta a todos los que coincidan) |
+
+---
+
+#### `nohup` y `&` — Ejecutar en segundo plano
+
+**Sintaxis:**
+```
+comando &                              # segundo plano, muere si cierras sesión
+nohup comando &                        # segundo plano + sobrevive al cierre de sesión
+nohup comando > salida.log 2>&1 &      # mismo + guarda toda la salida en archivo
+```
+
+**El problema sin `nohup`:**
+Cuando cierras una sesión SSH o terminal, Linux envía la señal `SIGHUP` a todos sus procesos hijo. Eso los mata. Si lanzaste un proceso largo con solo `&`, muere al cerrar sesión.
+
+**`nohup` ignora esa señal**, permitiendo que el proceso siga corriendo.
+
+**El operador `&` — lanzar en background:**
+```bash
+$ ./data_processor.sh &
+[1] 796
+```
+
+El `[1]` es el número de job, `796` es el PID. El proceso corre en paralelo y el prompt vuelve inmediatamente.
+
+**La combinación completa del lab:**
+```bash
+$ nohup ./data_processor.sh > processor.log 2>&1 &
+[1] 796
+```
+
+Desglose:
+```
+nohup                   → ignora SIGHUP (sobrevive al cierre de sesión)
+./data_processor.sh     → el script a ejecutar
+> processor.log         → redirige stdout (salida normal) al archivo
+2>&1                    → redirige stderr (errores) al mismo lugar que stdout
+&                       → lanza en segundo plano
+```
+
+**Verificar que terminó y leer su salida:**
+```bash
+$ cat processor.log
+nohup: ignoring input
+Starting data processing at Mon Mar 30 11:27:38 CST 2026
+Data processing complete at Mon Mar 30 11:27:43 CST 2026
+```
+
+La línea `nohup: ignoring input` es normal — indica que nohup cortó la entrada estándar del proceso.
+
+**Verificar si el proceso sigue corriendo:**
+```bash
+$ ps aux | grep data_processor
+labex  823  0.0  0.0  grep data_processor    ← solo el grep, el proceso ya terminó
+```
+
+Si aparece solo la línea del `grep`, el proceso ya terminó. Si hay otra línea con el script, aún está corriendo.
+
+---
+
+#### `top` para identificar el proceso culpable
+
+Ya conoces `top` del Lab 01. En este lab se usa activamente para diagnosticar:
+
+```
+%Cpu(s): 42.0 us,  1.3 sy,  56.6 id
+    201 labex  20  0  4356  1524  1364 R  100.0  0.0  4:29.65 resource_hog.sh
+```
+
+- `42.0 us` → 42% de CPU usada por procesos de usuario (anormal si debería estar libre)
+- El proceso PID 201 está al `100.0` %CPU con estado `R` (running)
+- `4:29.65` en TIME+ → lleva más de 4 minutos consumiendo CPU continuo
+
+Flujo de diagnóstico:
+1. `top` → identifica que hay un proceso al 100% CPU
+2. `pgrep nombre` → confirma el PID
+3. `ps -p PID -o pid,ppid,cmd` → verifica qué es exactamente y quién lo lanzó
+4. `pkill nombre` → lo termina
+5. `top` de nuevo → confirma que el CPU bajó
+
+---
+
+#### Errores frecuentes en este lab
+
+**`pgrep` sin resultado no significa error del comando:**
+El proceso puede que no exista, ya terminó, o el nombre tiene un typo. Verificar siempre con `ps aux | grep nombre` antes de concluir que no existe.
+
+**Usar `pkill` con nombre genérico:**
+```bash
+pkill bash    # mata TODOS los procesos bash del usuario, incluyendo tu propia sesión
+```
+Antes de `pkill`, confirmar con `pgrep` exactamente qué procesos coinciden.
+
+**`ps aux | grep proceso` siempre incluye el grep en los resultados:**
+```bash
+$ ps aux | grep resource_hog
+labex  658  0.0  grep resource_hog    ← esta línea es el grep mismo, no el proceso
+```
+Si solo ves la línea del `grep`, el proceso no está corriendo.
+
+**`nohup` sin `2>&1` pierde los errores:**
+Si el script falla, los errores van a `nohup.out` (archivo por defecto) en lugar del log que especificaste. Siempre agregar `2>&1` para capturar todo en un solo lugar.
+
+---
+
+### Ejercicio — Lab 06
+
+> Practica en [KillerCoda](https://killercoda.com/playgrounds/scenario/ubuntu) o cualquier terminal Linux.
+
+**Preparación:**
+```bash
+# Crea un proceso que consuma CPU (se detiene solo en 60 segundos)
+cat > /tmp/cpu_hog.sh << 'EOF'
+#!/bin/bash
+end=$((SECONDS+60))
+while [ $SECONDS -lt $end ]; do :; done
+echo "cpu_hog terminó"
+EOF
+chmod +x /tmp/cpu_hog.sh
+
+# Crea una tarea larga
+cat > /tmp/tarea_larga.sh << 'EOF'
+#!/bin/bash
+echo "Iniciando tarea $(date)"
+sleep 10
+echo "Tarea completada $(date)"
+EOF
+chmod +x /tmp/tarea_larga.sh
+
+# Lanza el cpu_hog en segundo plano
+/tmp/cpu_hog.sh &
+```
+
+**Tareas:**
+
+1. Usa `ps aux` para encontrar el proceso `cpu_hog.sh` y anota su PID.
+2. Usa `pgrep` para obtener el PID directamente por nombre.
+3. Usa `ps -p PID -o pid,ppid,%cpu,cmd` para ver su info detallada.
+4. Abre `top`, verifica que aparece consumiendo CPU (ordena con `P`), luego sal con `q`.
+5. Termina el proceso con `pkill`.
+6. Confirma con `pgrep` que ya no existe.
+7. Lanza `tarea_larga.sh` en segundo plano con `nohup`, redirigiendo toda la salida a `/tmp/tarea.log`.
+8. Verifica con `ps aux | grep tarea_larga` que está corriendo.
+9. Espera que termine (`sleep 12`) y lee el resultado con `cat /tmp/tarea.log`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+ps aux | grep cpu_hog
+pgrep cpu_hog.sh
+ps -p $(pgrep cpu_hog.sh) -o pid,ppid,%cpu,cmd
+top     # presiona P para ordenar por CPU, luego q
+pkill cpu_hog.sh
+pgrep cpu_hog.sh    # sin salida = terminado
+
+nohup /tmp/tarea_larga.sh > /tmp/tarea.log 2>&1 &
+ps aux | grep tarea_larga
+sleep 12
+cat /tmp/tarea.log
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -1223,6 +1558,16 @@ sudo grep "^m.torres:" /etc/shadow
 | `sudo usermod -L usuario` | Bloquea la cuenta de un usuario | 05 |
 | `sudo usermod -U usuario` | Desbloquea la cuenta de un usuario | 05 |
 | `grep "^usuario:" archivo` | Busca línea que empieza exactamente con ese texto | 05 |
+| `ps` | Procesos de la terminal actual | 06 |
+| `ps -x` | Todos tus procesos (con y sin terminal) | 06 |
+| `ps -u` | Tus procesos con %CPU y %MEM | 06 |
+| `ps aux` | Todos los procesos del sistema con recursos | 06 |
+| `ps -p PID -o cols` | Info específica de un proceso por PID | 06 |
+| `pgrep nombre` | Devuelve el PID de procesos que coinciden | 06 |
+| `pgrep -f "patrón"` | Busca en la línea de comando completa | 06 |
+| `pkill nombre` | Termina procesos por nombre (SIGTERM) | 06 |
+| `pkill -9 nombre` | Fuerza la terminación (SIGKILL) | 06 |
+| `nohup cmd > log 2>&1 &` | Lanza en background, sobrevive al cierre de sesión | 06 |
 
 ---
 
@@ -1264,6 +1609,16 @@ sudo grep "^m.torres:" /etc/shadow
 | **Ancla `^`** | En grep: obliga a que el patrón coincida desde el inicio de la línea |
 | **Cuenta bloqueada** | Usuario con `!` al inicio del hash en `/etc/shadow` — no puede autenticarse |
 | **`-aG`** | Append + Groups: agrega grupo sin reemplazar los existentes |
+| **`ps aux`** | Muestra todos los procesos del sistema con usuario, CPU y memoria |
+| **PID** | Process ID — número único de identificación de un proceso |
+| **PPID** | Parent Process ID — PID del proceso que lanzó este proceso |
+| **`SIGTERM`** | Señal 15 — pide al proceso que termine limpiamente |
+| **`SIGKILL`** | Señal 9 — mata el proceso inmediatamente sin limpieza posible |
+| **`SIGHUP`** | Señal 1 — enviada al cerrar sesión; termina los procesos hijo |
+| **`nohup`** | No Hangup — hace que un proceso ignore la señal SIGHUP |
+| **`&`** | Operador que lanza un proceso en segundo plano (background) |
+| **`2>&1`** | Redirige stderr al mismo destino que stdout |
+| **Zombie** | Proceso que terminó pero su padre no liberó su entrada en la tabla de procesos |
 
 ---
 
