@@ -16,6 +16,8 @@
   - [Lab 04 — Guardián de la Fortaleza](#lab-04--guardián-de-la-fortaleza)
   - [Lab 05 — Guardián de las Llaves](#lab-05--guardián-de-las-llaves)
   - [Lab 06 — Gestión de Procesos](#lab-06--gestión-de-procesos)
+  - [Lab 07 — El Portal Caído](#lab-07--el-portal-caído)
+  - [Lab 08 — Mantenimiento del Sistema](#lab-08--mantenimiento-del-sistema)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -1525,6 +1527,643 @@ cat /tmp/tarea.log
 
 ---
 
+### Lab 07 — El Portal Caído
+
+**Escenario:** El portal interno de la empresa dejó de responder. Los usuarios no pueden acceder y tu manager te asigna la tarea urgente. Nadie sabe si es un problema de red, de firewall o del servicio mismo. Tienes que diagnosticar paso a paso: primero las interfaces, luego la conectividad, después los puertos abiertos, y finalmente las reglas del firewall.
+
+> Este es el flujo de diagnóstico de red que todo sysadmin junior ejecuta cuando llega el ticket "el servicio no responde". En la mayoría de los casos, la causa está en uno de estos cuatro niveles.
+
+---
+
+#### `ip addr` — Ver las interfaces de red y sus direcciones IP
+
+**Sintaxis:**
+```
+ip addr
+ip addr show
+ip addr show eth0    # solo una interfaz específica
+```
+
+**Qué hace:** Muestra todas las interfaces de red del sistema con sus direcciones IP, máscaras de subred, direcciones MAC y estado (UP/DOWN).
+
+**Ejemplo del lab:**
+```
+ip addr
+```
+```
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 ...
+    inet 127.0.0.1/8 scope host lo
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 ...
+    inet 172.16.50.197/24 ... scope global dynamic eth0
+3: docker0: <NO-CARRIER,...,UP> mtu 1500 ...
+    inet 172.17.0.1/16 ... scope global docker0
+```
+
+**Cómo leer la salida:**
+
+| Campo | Qué significa |
+|-------|--------------|
+| `lo` | Loopback — interfaz virtual interna, siempre `127.0.0.1` |
+| `eth0` | Interfaz Ethernet principal — la que conecta al mundo exterior |
+| `docker0` | Interfaz virtual de Docker — crea su propia red interna |
+| `UP` / `DOWN` | Estado de la interfaz. Si `eth0` está `DOWN`, no hay red |
+| `inet 172.16.50.197/24` | Dirección IPv4 y máscara de subred (`/24` = 255.255.255.0) |
+| `NO-CARRIER` | Cable no conectado o interfaz sin tráfico real |
+
+> `ip addr` es la versión moderna de `ifconfig`. En sistemas nuevos, `ip` es la herramienta oficial del kernel — más detallada y siempre disponible.
+
+---
+
+#### `ifconfig` — Vista clásica de interfaces de red
+
+**Sintaxis:**
+```
+ifconfig               # todas las interfaces activas
+ifconfig eth0          # solo una interfaz
+```
+
+**Qué hace:** Muestra la configuración de las interfaces de red. Herramienta clásica (del paquete `net-tools`), equivalente a `ip addr` pero con formato diferente.
+
+**Ejemplo del lab:**
+```
+ifconfig
+```
+```
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+      inet 172.16.50.197  netmask 255.255.255.0  broadcast 172.16.50.255
+      RX packets 20952  bytes 28650863 (28.6 MB)
+      TX packets 3122   bytes 2169499 (2.1 MB)
+
+lo:   flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+      inet 127.0.0.1  netmask 255.0.0.0
+```
+
+**Diferencia práctica con `ip addr`:**
+
+| `ip addr` | `ifconfig` |
+|-----------|-----------|
+| Moderno, del kernel | Clásico, del paquete `net-tools` |
+| Disponible en todo Linux reciente | Puede no estar instalado por defecto |
+| Muestra más detalles de IPv6 y enrutamiento | Formato más legible para lectura rápida |
+| `inet 172.x.x.x/24` | `inet 172.x.x.x  netmask 255.255.255.0` |
+
+> Ambos muestran la misma información esencial. En producción, `ip` es el estándar actual.
+
+---
+
+#### `ping` — Probar conectividad con otro host
+
+**Sintaxis:**
+```
+ping destino
+ping -c N destino    # envía exactamente N paquetes y termina
+```
+
+**Qué hace:** Envía paquetes ICMP al destino y espera respuesta. Sirve para verificar que hay conexión a un host y medir la latencia (tiempo de ida y vuelta).
+
+**Ejemplo del lab:**
+```
+ping -c 3 8.8.8.8
+```
+```
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=118 time=1.47 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=118 time=1.46 ms
+64 bytes from 8.8.8.8: icmp_seq=3 ttl=118 time=1.44 ms
+
+--- 8.8.8.8 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2003ms
+rtt min/avg/max/mdev = 1.438/1.455/1.467/0.012 ms
+```
+
+**Cómo leer la estadística final:**
+
+| Campo | Qué indica |
+|-------|-----------|
+| `3 packets transmitted, 3 received` | No hay pérdida — hay conexión estable |
+| `0% packet loss` | Ningún paquete se perdió en tránsito |
+| `time=1.47 ms` | Latencia: 1.47 milisegundos — excelente |
+| `rtt min/avg/max/mdev` | Tiempos mínimo, promedio, máximo y desviación |
+
+> Sin `-c`, `ping` corre indefinidamente. En un diagnóstico, `-c 3` o `-c 4` es suficiente para confirmar conectividad. Para detener un ping sin `-c`, usa `Ctrl+C`.
+
+> `8.8.8.8` es el servidor DNS público de Google — se usa frecuentemente en pruebas porque casi siempre responde ping desde cualquier red con acceso a internet.
+
+---
+
+#### `ss` — Inspeccionar puertos y conexiones de red
+
+**Sintaxis:**
+```
+ss              # conexiones activas (resumen)
+ss -t           # solo conexiones TCP establecidas
+ss -l           # solo puertos en escucha (listening)
+ss -n           # sin resolver nombres, muestra números
+ss -p           # muestra el proceso dueño de cada socket
+ss -tlnp        # combinado: TCP + listening + numérico + proceso
+```
+
+**Qué hace:** Muestra el estado de los sockets de red del sistema: qué puertos están escuchando, qué conexiones están activas y qué proceso es responsable de cada uno. Es el reemplazo moderno de `netstat`.
+
+**Ejemplo del lab — conexiones TCP activas:**
+```
+ss -t
+```
+```
+State    Recv-Q  Send-Q  Local Address:Port       Peer Address:Port
+ESTAB    0       0       172.16.50.197:ssh         47.251.15.187:51614
+ESTAB    0       0       172.16.50.197:3002        172.16.50.251:53496
+```
+
+**Ejemplo del lab — puertos en escucha con proceso:**
+```
+ss -tlnp
+```
+```
+State   Recv-Q  Send-Q  Local Address:Port  Peer Address:Port  Process
+LISTEN  0       5             0.0.0.0:8000        0.0.0.0:*    ("python3",pid=3262)
+LISTEN  0       128           0.0.0.0:22          0.0.0.0:*
+LISTEN  0       511           0.0.0.0:3000        0.0.0.0:*    ("node",pid=2089)
+LISTEN  0       128           0.0.0.0:3002        0.0.0.0:*    ("ttyd",pid=897)
+```
+
+**Flags de `ss` explicados:**
+
+| Flag | Nombre | Qué hace |
+|------|--------|---------|
+| `-t` | TCP | Solo muestra sockets TCP |
+| `-l` | Listening | Solo muestra puertos en escucha |
+| `-n` | Numeric | No resuelve nombres: muestra `22` en vez de `ssh`, IPs en vez de hostnames |
+| `-p` | Process | Muestra qué proceso tiene abierto ese socket |
+| `-u` | UDP | Solo muestra sockets UDP |
+
+**Combinación más útil para diagnóstico:**
+```
+ss -tlnp
+```
+> Esto responde la pregunta crítica: **¿qué procesos están escuchando en qué puertos?** Si el portal debería estar en el puerto 8000 y no aparece aquí, el servicio no está corriendo.
+
+**Filtrar un puerto específico:**
+```
+ss -tlnp | grep 8000
+```
+```
+LISTEN  0  5  0.0.0.0:8000  0.0.0.0:*  users:(("python3",pid=3262,fd=3))
+```
+
+> Aquí descubrimos que el portal estaba escuchando en el puerto 8000, pero estaba bloqueado por el firewall. El servicio correría — el problema era `ufw`.
+
+---
+
+#### `ufw` — Firewall de Ubuntu/Debian (Uncomplicated Firewall)
+
+**Sintaxis:**
+```
+sudo ufw status           # ver estado y reglas actuales
+sudo ufw enable           # activar el firewall
+sudo ufw disable          # desactivar el firewall
+sudo ufw allow PUERTO     # permitir tráfico en ese puerto
+sudo ufw deny PUERTO      # bloquear tráfico en ese puerto
+sudo ufw status numbered  # ver reglas con número para poder borrarlas
+sudo ufw delete N         # eliminar regla número N
+```
+
+**Qué hace:** Administra las reglas del firewall del sistema. Determina qué conexiones entrantes o salientes se permiten o bloquean. Un firewall mal configurado puede dejar servicios inaccesibles aunque estén corriendo correctamente.
+
+**Flujo del lab — diagnóstico y corrección del firewall:**
+```bash
+# El portal estaba escuchando en 8000 pero era inaccesible
+# Primero bloqueamos el puerto incorrecto que estaba sin protección
+sudo ufw deny 8000
+
+# Aseguramos que SSH siga accesible antes de activar el firewall
+sudo ufw allow ssh
+
+# Activamos el firewall
+sudo ufw enable
+```
+```
+Rules updated
+Rules updated (v6)
+Firewall is active and enabled on system startup
+```
+
+> En el lab, el problema era que el firewall no estaba activo (`ufw` desactivado), por lo que cualquier puerto quedaba expuesto. Al activarlo con las reglas correctas, el portal quedó protegido y accesible solo donde correspondía.
+
+**Reglas comunes de referencia:**
+
+| Comando | Efecto |
+|---------|--------|
+| `sudo ufw allow ssh` | Permite SSH (puerto 22) — siempre hacer esto **antes** de `enable` |
+| `sudo ufw allow 80` | Permite tráfico HTTP |
+| `sudo ufw allow 443` | Permite tráfico HTTPS |
+| `sudo ufw deny 8000` | Bloquea el puerto 8000 |
+| `sudo ufw status` | Muestra si el firewall está activo y qué reglas tiene |
+
+> **Regla de oro:** Antes de ejecutar `sudo ufw enable`, siempre agrega `sudo ufw allow ssh`. Si activas el firewall sin esa regla y estás conectado por SSH, pierdes el acceso inmediatamente.
+
+---
+
+#### Flujo de diagnóstico de red
+
+Cuando recibes el ticket "el servicio no responde", este es el orden de investigación:
+
+```
+1. ip addr              → ¿Las interfaces están UP? ¿Tenemos IP?
+        ↓
+2. ping -c 3 8.8.8.8   → ¿Hay conectividad hacia afuera?
+        ↓
+3. ss -tlnp             → ¿El servicio está escuchando en su puerto?
+        ↓
+4. ss -tlnp | grep PUERTO  → ¿Qué proceso ocupa ese puerto?
+        ↓
+5. sudo ufw status      → ¿El firewall permite o bloquea ese puerto?
+```
+
+Si el servicio aparece en `ss -tlnp` pero no responde externamente, el problema casi siempre está en el firewall. Si no aparece, el servicio no está corriendo.
+
+---
+
+#### Errores frecuentes — Lab 07
+
+**`sudo ufw enable` sin permitir SSH antes**
+
+Si activas `ufw` sin agregar la regla `allow ssh`, el firewall bloquea inmediatamente todas las conexiones SSH entrantes. Si estás en una sesión remota, pierdes el acceso en ese instante. La única recuperación es acceso físico a la máquina o consola de emergencia (como la consola de EC2 en AWS o acceso VNC).
+
+**Interpretar `NO-CARRIER` como error de configuración**
+
+`NO-CARRIER` en `ip addr` significa que la interfaz está activa en el SO pero no hay señal física (cable desconectado o interfaz virtual sin tráfico). Para `docker0` es completamente normal cuando no hay contenedores corriendo — no es un problema.
+
+**Confundir `ss -l` con `ss -t`**
+
+`ss -l` muestra los puertos que están *esperando conexiones* (modo servidor). `ss -t` muestra las conexiones *ya establecidas* (modo cliente activo). Para diagnóstico de servicios, siempre empieza con `ss -tlnp` — combina ambos enfoques con información del proceso responsable.
+
+**Usar `ping` sin `-c` en un script**
+
+Sin `-c N`, `ping` corre infinitamente. En un script de diagnóstico automatizado, un `ping` sin límite bloquea todo lo que sigue. Siempre especifica `-c 3` o `-c 4` cuando usas ping en scripts o en diagnósticos con pasos subsiguientes.
+
+---
+
+#### Ejercicio — Lab 07
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux con acceso sudo.
+
+**Preparación:**
+
+Ejecuta esto para simular el entorno del lab:
+```bash
+# Instala herramientas necesarias
+sudo apt-get update -q && sudo apt-get install -y net-tools ufw python3
+
+# Lanza un servidor simple en el puerto 8080
+python3 -m http.server 8080 &
+SERVER_PID=$!
+echo "Servidor iniciado con PID $SERVER_PID en puerto 8080"
+```
+
+**Tareas:**
+
+1. Usa `ip addr` para identificar tus interfaces de red. Anota la dirección IP de la interfaz principal (no `lo`).
+2. Usa `ifconfig` y compara la salida con `ip addr` — ¿muestran la misma IP?
+3. Usa `ping -c 3 8.8.8.8` para verificar conectividad externa. ¿Cuál fue el tiempo promedio (`avg`)?
+4. Usa `ss -tlnp` para ver todos los puertos en escucha. ¿En qué puerto está corriendo `python3`?
+5. Filtra con `ss -tlnp | grep 8080` para confirmar que es el puerto correcto.
+6. Verifica el estado del firewall con `sudo ufw status`.
+7. Agrega la regla para permitir SSH: `sudo ufw allow ssh`.
+8. Activa el firewall con `sudo ufw enable`.
+9. Verifica con `sudo ufw status` que las reglas están activas.
+10. Termina el servidor: `kill $SERVER_PID` o `pkill -f "http.server"`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1 y 2
+ip addr
+ifconfig
+
+# Paso 3
+ping -c 3 8.8.8.8
+
+# Paso 4 y 5
+ss -tlnp
+ss -tlnp | grep 8080
+
+# Paso 6
+sudo ufw status
+
+# Paso 7, 8 y 9
+sudo ufw allow ssh
+sudo ufw enable
+sudo ufw status
+
+# Paso 10
+kill $SERVER_PID
+# o si ya no tienes la variable:
+pkill -f "http.server"
+```
+
+</details>
+
+---
+
+### Lab 08 — Mantenimiento del Sistema
+
+**Escenario:** El servidor del equipo lleva semanas sin mantenimiento. Se han acumulado paquetes obsoletos que ningún servicio usa, hay software que ya no se necesita y las listas de repositorios están desactualizadas. Tu tarea: limpiar el sistema sin romper nada, verificar el estado del software instalado y mantener todo ordenado.
+
+> Un sysadmin no solo instala cosas — también tiene la responsabilidad de mantener el sistema limpio. Los paquetes huérfanos ocupan disco, pueden tener vulnerabilidades sin parche y complican los diagnósticos futuros.
+
+---
+
+#### `apt` — Gestor de paquetes de Ubuntu/Debian
+
+**Sintaxis:**
+```
+apt [opciones] comando
+apt install paquete     # instalar
+apt remove paquete      # desinstalar (conserva configuración)
+apt purge paquete       # desinstalar + eliminar archivos de configuración
+apt update              # actualizar listas de paquetes (no instala nada)
+apt upgrade             # instalar actualizaciones disponibles
+apt autoremove          # eliminar paquetes huérfanos no necesarios
+apt search término      # buscar paquetes por nombre o descripción
+apt show paquete        # ver detalles de un paquete
+apt list --installed    # listar paquetes instalados
+```
+
+**Qué hace:** `apt` es el gestor de paquetes interactivo de sistemas basados en Debian (Ubuntu, Linux Mint, etc.). Permite instalar, actualizar y eliminar software del sistema, siempre descargando desde repositorios oficiales verificados.
+
+**Ejemplo del lab — ver ayuda:**
+```
+apt
+```
+```
+apt 2.4.12 (amd64)
+Usage: apt [options] command
+
+Most used commands:
+  list         - list packages based on package names
+  search       - search in package descriptions
+  show         - show package details
+  install      - install packages
+  remove       - remove packages
+  autoremove   - Remove automatically all unused packages
+  update       - update list of available packages
+  upgrade      - upgrade the system
+```
+
+> Ejecutar `apt` sin argumentos muestra los subcomandos disponibles — útil para recordar la sintaxis sin buscar en el manual.
+
+**Diferencia entre los comandos de eliminación:**
+
+| Comando | Qué elimina |
+|---------|------------|
+| `apt remove paquete` | Elimina el programa pero conserva archivos de configuración |
+| `apt purge paquete` | Elimina el programa Y sus archivos de configuración |
+| `apt autoremove` | Elimina paquetes instalados como dependencias que ya nadie usa |
+
+> La regla de producción: usa `remove` cuando no estás seguro de volver a instalar, y `purge` cuando quieres limpiar completamente para reinstalar desde cero.
+
+---
+
+#### `sudo apt update` — Actualizar la lista de paquetes disponibles
+
+**Sintaxis:**
+```
+sudo apt update
+```
+
+**Qué hace:** Descarga la lista actualizada de paquetes desde los repositorios configurados. No instala ni actualiza nada — solo sincroniza la base de datos local con lo que hay disponible.
+
+**Ejemplo del lab:**
+```
+sudo apt update
+```
+```
+Hit:1 http://mirrors.cloud.aliyuncs.com/ubuntu jammy InRelease
+Hit:2 http://mirrors.cloud.aliyuncs.com/ubuntu jammy-updates InRelease
+Hit:3 http://mirrors.cloud.aliyuncs.com/ubuntu jammy-backports InRelease
+Hit:4 http://mirrors.cloud.aliyuncs.com/ubuntu jammy-security InRelease
+Reading package lists... Done
+344 packages can be upgraded. Run 'apt list --upgradable' to see them.
+```
+
+**Cómo leer la salida:**
+
+| Indicador | Significado |
+|-----------|------------|
+| `Hit:N` | El repositorio no cambió desde la última vez — no descarga nada |
+| `Get:N` | Hay nueva lista disponible — la descarga |
+| `Ign:N` | El repositorio fue ignorado (puede ser irrelevante o redundante) |
+| `Err:N` | Error al conectar con el repositorio — revisar red o URL |
+| `N packages can be upgraded` | Cuántos paquetes tienen actualizaciones disponibles |
+
+> `apt update` siempre debe ejecutarse antes de `apt install` o `apt upgrade`. Sin actualizar primero, instalarías versiones antiguas de la lista cacheada.
+
+---
+
+#### `sudo apt autoremove` — Limpiar paquetes huérfanos
+
+**Sintaxis:**
+```
+sudo apt autoremove
+```
+
+**Qué hace:** Identifica y elimina paquetes que fueron instalados automáticamente como dependencias de otro paquete, pero que ya no son necesarios porque ese paquete principal fue desinstalado.
+
+**Ejemplo del lab:**
+```
+sudo apt autoremove
+```
+```
+The following packages will be REMOVED:
+  gir1.2-libxfce4util-1.0 gir1.2-xfconf-0 gsfonts-x11 libdbus-glib-1-2
+  libgdk-pixbuf-xlib-2.0-0 libjpeg-turbo-progs miscfiles xscreensaver-data
+0 upgraded, 0 newly installed, 8 to remove and 344 not upgraded.
+After this operation, 5,641 kB disk space will be freed.
+Do you want to continue? [Y/n] y
+```
+
+**Qué pasó aquí:** Al eliminar un paquete principal (en este caso `figlet`), quedaron 8 dependencias que nadie más usa. `autoremove` las detectó y liberó 5.6 MB de disco.
+
+> Antes de confirmar con `y`, lee la lista de paquetes que se van a eliminar. Si reconoces alguno que usas directamente, escribe `n` e investiga. Un paquete puede ser dependencia de otro que aún necesitas.
+
+**Cuándo ejecutar `autoremove`:**
+- Después de `apt remove` o `apt purge`
+- Al final de una sesión de limpieza del sistema
+- Periódicamente en servidores que llevan tiempo sin mantenimiento
+
+---
+
+#### `dpkg -s` — Verificar si un paquete está instalado
+
+**Sintaxis:**
+```
+dpkg -s nombre_paquete
+```
+
+**Qué hace:** Consulta la base de datos local de paquetes instalados y muestra el estado detallado de un paquete específico. No requiere conexión a internet — trabaja con lo que ya está instalado.
+
+**Ejemplo del lab:**
+```
+dpkg -s neofetch
+```
+```
+Package: neofetch
+Status: install ok installed
+Priority: optional
+Section: utils
+Installed-Size: 351
+Maintainer: Ubuntu Developers
+Architecture: all
+Version: 7.1.0-3
+Description: Shows Linux System Information with Distribution Logo
+```
+
+**Campos más útiles:**
+
+| Campo | Qué indica |
+|-------|-----------|
+| `Status: install ok installed` | El paquete está correctamente instalado |
+| `Status: deinstall ok config-files` | Fue desinstalado pero quedan archivos de configuración |
+| `Version` | Versión exacta instalada |
+| `Installed-Size` | Espacio que ocupa en disco (en KB) |
+| `Description` | Qué hace el paquete |
+
+**Cuándo usar `dpkg -s` vs `apt show`:**
+
+| Comando | Consulta | Requiere red |
+|---------|---------|-------------|
+| `dpkg -s paquete` | Estado de instalación actual | No — usa base de datos local |
+| `apt show paquete` | Info del paquete en el repositorio | No (usa caché), sí para info nueva |
+| `which comando` | Si un ejecutable está disponible en PATH | No |
+
+> Para confirmar rápidamente si algo está instalado: `dpkg -s nombre 2>/dev/null | grep Status`. Si devuelve `install ok installed`, está. Si no devuelve nada, no está instalado.
+
+---
+
+#### `sudo apt remove` — Desinstalar un paquete
+
+**Sintaxis:**
+```
+sudo apt remove nombre_paquete
+```
+
+**Qué hace:** Elimina el software del sistema pero conserva sus archivos de configuración en `/etc/`. Si reinstalaras el paquete, recuperaría tu configuración anterior.
+
+**Ejemplo del lab:**
+```
+sudo apt remove figlet
+```
+```
+The following packages will be REMOVED:
+  figlet
+After this operation, 615 kB disk space will be freed.
+Do you want to continue? [Y/n] y
+```
+
+> `apt remove` muestra qué va a eliminar y cuánto espacio liberará antes de pedir confirmación. Siempre lee la lista — si aparecen paquetes inesperados, es porque son dependencias exclusivas del paquete que estás eliminando.
+
+---
+
+#### Flujo de mantenimiento de paquetes
+
+Para mantener un sistema limpio de forma segura:
+
+```
+1. sudo apt update             → Sincronizar listas de repositorios
+        ↓
+2. dpkg -s paquete             → Verificar qué está instalado antes de actuar
+        ↓
+3. sudo apt remove paquete     → Eliminar software no necesario
+        ↓
+4. sudo apt autoremove         → Limpiar dependencias huérfanas
+        ↓
+5. sudo apt upgrade            → (Opcional) Instalar actualizaciones pendientes
+```
+
+> Este orden importa: actualizar primero, luego limpiar, luego parchear. Hacerlo al revés puede instalar actualizaciones de paquetes que vas a borrar de todas formas.
+
+---
+
+#### Errores frecuentes — Lab 08
+
+**`apt install` sin `apt update` primero**
+
+La lista de paquetes local puede estar desactualizada. Podrías instalar una versión antigua o recibir el error `Unable to locate package` aunque el paquete exista. Siempre `sudo apt update` antes de instalar algo nuevo.
+
+**`apt remove` cuando se quería `apt purge`**
+
+Si desinstalaras y reinstalaras un servicio (por ejemplo `nginx`), con `remove` la reinstalación recuperaría la configuración anterior — incluyendo posibles configuraciones incorrectas que causaron el problema original. Usa `purge` para empezar desde cero.
+
+**Confirmar `autoremove` sin leer la lista**
+
+Si un paquete fue instalado manualmente pero `apt` lo marcó como dependencia automática, `autoremove` intentará borrarlo. Antes de confirmar con `y`, lee los nombres — si algo parece importante, cancela con `n` y márcalo como manual: `sudo apt-mark manual nombre_paquete`.
+
+**Mezclar `apt` y `dpkg` directamente para instalar `.deb`**
+
+Instalar un `.deb` con `sudo dpkg -i paquete.deb` no resuelve dependencias automáticamente. Si falta alguna dependencia, el paquete queda en estado roto. La solución: después de `dpkg -i`, ejecuta `sudo apt install -f` para que `apt` resuelva las dependencias faltantes.
+
+---
+
+#### Ejercicio — Lab 08
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Debian/Ubuntu con acceso sudo.
+
+**Tareas:**
+
+1. Ejecuta `sudo apt update` y anota cuántos paquetes pueden actualizarse.
+2. Instala el paquete `cowsay`: `sudo apt install cowsay`.
+3. Verifica que quedó instalado con `dpkg -s cowsay` — ¿cuál es la versión?
+4. Usa `apt show cowsay` y compara la información con `dpkg -s cowsay`.
+5. Desinstala `cowsay` con `sudo apt remove cowsay`.
+6. Verifica con `dpkg -s cowsay` — ¿qué dice el campo `Status` ahora?
+7. Ejecuta `sudo apt autoremove` y observa si queda alguna dependencia huérfana.
+8. Instala `cowsay` de nuevo con `sudo apt install cowsay`.
+9. Ahora desinstálalo con `sudo apt purge cowsay`.
+10. Ejecuta `dpkg -s cowsay` de nuevo — ¿hay diferencia respecto al paso 6?
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+sudo apt update
+
+# Paso 2
+sudo apt install cowsay
+
+# Paso 3
+dpkg -s cowsay
+
+# Paso 4
+apt show cowsay
+
+# Paso 5
+sudo apt remove cowsay
+
+# Paso 6 — Status cambia a: "deinstall ok config-files"
+dpkg -s cowsay
+
+# Paso 7
+sudo apt autoremove
+
+# Paso 8
+sudo apt install cowsay
+
+# Paso 9
+sudo apt purge cowsay
+
+# Paso 10 — dpkg -s puede no encontrar el paquete o mostrar "unknown ok not-installed"
+dpkg -s cowsay
+```
+
+> La diferencia clave entre el paso 6 y el 10: `remove` deja el estado `config-files`, `purge` elimina completamente toda traza del paquete.
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -1568,6 +2207,26 @@ cat /tmp/tarea.log
 | `pkill nombre` | Termina procesos por nombre (SIGTERM) | 06 |
 | `pkill -9 nombre` | Fuerza la terminación (SIGKILL) | 06 |
 | `nohup cmd > log 2>&1 &` | Lanza en background, sobrevive al cierre de sesión | 06 |
+| `ip addr` | Muestra todas las interfaces de red y sus IPs | 07 |
+| `ip addr show eth0` | Muestra solo una interfaz específica | 07 |
+| `ifconfig` | Vista clásica de interfaces de red (net-tools) | 07 |
+| `ping -c N destino` | Envía N paquetes ICMP para probar conectividad | 07 |
+| `ss -t` | Conexiones TCP actualmente establecidas | 07 |
+| `ss -tlnp` | Puertos TCP en escucha con proceso responsable | 07 |
+| `ss -tlnp \| grep PUERTO` | Filtra qué proceso ocupa un puerto específico | 07 |
+| `sudo ufw status` | Muestra si el firewall está activo y sus reglas | 07 |
+| `sudo ufw allow ssh` | Permite SSH (siempre antes de `enable`) | 07 |
+| `sudo ufw allow PUERTO` | Abre un puerto en el firewall | 07 |
+| `sudo ufw deny PUERTO` | Bloquea un puerto en el firewall | 07 |
+| `sudo ufw enable` | Activa el firewall | 07 |
+| `sudo apt update` | Sincroniza listas de paquetes con los repositorios | 08 |
+| `sudo apt install paquete` | Instala un paquete y sus dependencias | 08 |
+| `sudo apt remove paquete` | Desinstala un paquete (conserva configuración) | 08 |
+| `sudo apt purge paquete` | Desinstala paquete y elimina su configuración | 08 |
+| `sudo apt autoremove` | Elimina dependencias huérfanas ya no necesarias | 08 |
+| `apt show paquete` | Muestra info del paquete desde el repositorio | 08 |
+| `dpkg -s paquete` | Verifica si un paquete está instalado y su versión | 08 |
+| `apt list --installed` | Lista todos los paquetes instalados en el sistema | 08 |
 
 ---
 
@@ -1619,6 +2278,36 @@ cat /tmp/tarea.log
 | **`&`** | Operador que lanza un proceso en segundo plano (background) |
 | **`2>&1`** | Redirige stderr al mismo destino que stdout |
 | **Zombie** | Proceso que terminó pero su padre no liberó su entrada en la tabla de procesos |
+| **Interfaz de red** | Punto de conexión entre el sistema y una red — física (`eth0`) o virtual (`lo`, `docker0`) |
+| **`lo` (loopback)** | Interfaz virtual interna: `127.0.0.1` — el sistema habla consigo mismo |
+| **`eth0`** | Primera interfaz Ethernet — la conexión principal a la red |
+| **`NO-CARRIER`** | Interfaz activa en el SO pero sin señal física — normal en `docker0` sin contenedores |
+| **`ip addr`** | Herramienta moderna del kernel para ver y gestionar interfaces de red |
+| **`ifconfig`** | Herramienta clásica (net-tools) para ver interfaces — equivalente legacy de `ip addr` |
+| **ICMP** | Protocolo que usa `ping` para probar conectividad — no es TCP ni UDP |
+| **Latencia** | Tiempo de ida y vuelta de un paquete de red — se mide en milisegundos (ms) |
+| **`ss`** | Socket Statistics — reemplazo moderno de `netstat` para ver puertos y conexiones |
+| **Socket** | Punto de comunicación de red — combinación de IP + puerto + protocolo |
+| **Puerto** | Número (0-65535) que identifica un servicio en un host — ej. 22=SSH, 80=HTTP |
+| **LISTEN** | Estado de un socket esperando conexiones entrantes |
+| **ESTAB** | Estado ESTABLISHED — conexión TCP activa y establecida |
+| **Firewall** | Sistema que filtra tráfico de red según reglas — permite o bloquea puertos e IPs |
+| **`ufw`** | Uncomplicated Firewall — capa simplificada sobre `iptables` para gestionar el firewall |
+| **`/24`** | Notación CIDR de máscara de subred — equivale a `255.255.255.0`, red de 254 hosts |
+| **`apt`** | Advanced Package Tool — gestor de paquetes interactivo de Debian/Ubuntu |
+| **`dpkg`** | Debian Package Manager — herramienta de bajo nivel que instala `.deb` directamente |
+| **Repositorio** | Servidor donde se almacenan y distribuyen paquetes de software verificados |
+| **Paquete** | Unidad de software distribuible: contiene el programa, dependencias y metadatos |
+| **Dependencia** | Paquete que otro paquete necesita para funcionar correctamente |
+| **Paquete huérfano** | Dependencia instalada automáticamente cuyo paquete principal ya fue eliminado |
+| **`apt update`** | Descarga listas actualizadas de paquetes — no instala nada, solo sincroniza |
+| **`apt upgrade`** | Instala las actualizaciones disponibles de los paquetes instalados |
+| **`apt remove`** | Elimina el software pero conserva archivos de configuración en `/etc/` |
+| **`apt purge`** | Elimina el software Y sus archivos de configuración — limpieza completa |
+| **`apt autoremove`** | Limpia paquetes instalados como dependencias que ya ningún paquete requiere |
+| **`Hit:` en apt update** | El repositorio no cambió desde la última sincronización |
+| **`Get:` en apt update** | Hay nueva información disponible — la descarga |
+| **`Status: install ok installed`** | Estado de dpkg que confirma que el paquete está correctamente instalado |
 
 ---
 
@@ -1678,6 +2367,29 @@ Esta sección recopila los errores más comunes al administrar sistemas Linux. N
 |-------|-------------|----------------|
 | Ejecutar `sudo` sin entender el comando | Puede modificar archivos del sistema sin posibilidad de revertir | Siempre prueba el comando sin `sudo` primero para ver qué haría |
 | `sudo !!` sin revisar el historial | Ejecuta como root el último comando, que puede no ser lo que esperas | Revisar con `history` antes de usar `!!` |
+
+---
+
+### Gestión de paquetes
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| `apt install` sin `apt update` primero | Se instala una versión desactualizada o se recibe `Unable to locate package` | Siempre `sudo apt update` antes de instalar algo nuevo |
+| `apt remove` cuando se quería `purge` | Quedan archivos de configuración — la reinstalación hereda la config rota | `sudo apt purge paquete` para eliminar programa y configuración completamente |
+| Confirmar `autoremove` sin leer la lista | Se elimina un paquete que necesitas — puede romper servicios | Leer la lista antes de `y`; si algo parece importante, cancelar con `n` |
+| `dpkg -i paquete.deb` sin resolver dependencias | El paquete queda en estado roto (`dependency problems`) | Después de `dpkg -i`, ejecutar `sudo apt install -f` para resolver dependencias |
+| `apt upgrade` en producción sin probar antes | Las actualizaciones pueden cambiar comportamiento de servicios críticos | Primero en staging; en producción, actualizar paquete a paquete con `apt install paquete=versión` |
+
+---
+
+### Red y firewall
+
+| Error | Consecuencia | Forma correcta |
+|-------|-------------|----------------|
+| `sudo ufw enable` sin agregar `allow ssh` antes | El firewall bloquea la sesión SSH activa — pierdes acceso remoto inmediatamente | Siempre `sudo ufw allow ssh` antes de `sudo ufw enable` |
+| `ping` sin `-c N` en un script | El ping corre indefinidamente bloqueando los pasos siguientes | `ping -c 3 destino` para limitar a 3 paquetes |
+| `ss -l` cuando se quería ver conexiones activas | Solo muestra puertos en espera, no conexiones ya establecidas | `ss -t` para conexiones activas, `ss -tlnp` para diagnóstico completo |
+| Confundir puerto en escucha con servicio accesible | Un puerto puede estar en LISTEN pero bloqueado por firewall | Verificar con `ss -tlnp` Y con `sudo ufw status` — ambos deben alinearse |
 
 ---
 
