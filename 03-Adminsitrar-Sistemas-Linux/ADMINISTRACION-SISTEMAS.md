@@ -18,6 +18,8 @@
   - [Lab 06 — Gestión de Procesos](#lab-06--gestión-de-procesos)
   - [Lab 07 — El Portal Caído](#lab-07--el-portal-caído)
   - [Lab 08 — Mantenimiento del Sistema](#lab-08--mantenimiento-del-sistema)
+  - [Lab 09 — El Centinela de Datos](#lab-09--el-centinela-de-datos)
+  - [Lab 10 — Artesano de Scripts](#lab-10--artesano-de-scripts)
 - [Referencia Rápida](#referencia-rápida)
 - [Glosario](#glosario)
 
@@ -2164,6 +2166,690 @@ dpkg -s cowsay
 
 ---
 
+### Lab 09 — El Centinela de Datos
+
+**Escenario:** La empresa descubrió que nadie hace respaldos de los datos críticos. Si un disco falla hoy, todo se pierde. Tu misión: diseñar una estrategia completa de respaldo — crear la estructura de directorios, generar el archivo comprimido, verificar que está íntegro, guardar el inventario de su contenido, y finalmente automatizarlo para que ocurra solo, todos los días, sin intervención humana.
+
+> Un respaldo que no se verifica no es un respaldo — es una esperanza. Y un respaldo que depende de que alguien lo recuerde ejecutar tampoco es un respaldo — es una lotería. La automatización con cron elimina ambos problemas.
+
+---
+
+#### Estructura de directorios para respaldos
+
+El primer paso de cualquier estrategia de respaldo es definir qué datos son críticos y dónde vivirán los archivos de respaldo.
+
+**Comandos del lab:**
+```bash
+touch backup-list.txt
+mkdir -p data config logs
+```
+
+Esto crea la estructura base:
+```
+proyecto/
+├── backup-list.txt    ← inventario de qué se respalda
+├── data/              ← datos de la aplicación
+├── config/            ← archivos de configuración
+└── logs/              ← registros del sistema
+```
+
+> La separación en `data/`, `config/` y `logs/` no es capricho — cada directorio tiene un ciclo de vida diferente. `config/` cambia raramente pero es crítico; `data/` cambia frecuentemente; `logs/` crece solo y generalmente no se respalda igual que los otros dos.
+
+---
+
+#### `tar -czf` con la flag `-C` — Empaquetar desde una ruta específica
+
+Ya conocemos `tar -czf` del Lab 02. En este lab aparece una variante importante: la flag `-C`.
+
+**El problema que resuelve `-C`:**
+
+En el lab ocurrió este error:
+```
+labex:backups/ $ tar -czf system-backup.tar.gz backup-list.txt
+tar: backup-list.txt: Cannot stat: No such file or directory
+```
+
+El problema: estábamos dentro de `backups/` y pedimos empaquetar `backup-list.txt`, pero ese archivo está en el directorio padre. `tar` busca el archivo en el directorio actual y no lo encuentra.
+
+**La solución correcta:**
+```bash
+cd ..   # volver al directorio correcto
+tar -czf system-backup.tar.gz backup-list.txt
+mv system-backup.tar.gz backups/
+```
+
+**La alternativa con `-C` (mejor práctica):**
+```bash
+tar -czf backups/system-backup.tar.gz -C /home/labex/project data config logs
+```
+
+La flag `-C ruta` le dice a `tar`: *"antes de empaquetar, cambia al directorio indicado"*. Así puedes ejecutar el comando desde cualquier lugar del sistema sin preocuparte por el directorio actual.
+
+| Flag de `tar` | Función |
+|--------------|---------|
+| `-c` | Create — crear un nuevo archivo |
+| `-z` | gZip — comprimir con gzip |
+| `-f` | File — el siguiente argumento es el nombre del archivo |
+| `-C ruta` | Change directory — cambia al directorio antes de empaquetar |
+| `-v` | Verbose — muestra cada archivo mientras se procesa |
+
+---
+
+#### `tar -tzvf` — Verificar el contenido de un respaldo con detalle
+
+**Sintaxis:**
+```
+tar -tzvf archivo.tar.gz
+```
+
+**Qué hace:** Lista el contenido del archivo comprimido sin extraerlo. La `v` (verbose) agrega permisos, usuario, grupo, tamaño y fecha de cada archivo — información esencial para verificar que el respaldo está completo e íntegro.
+
+**Ejemplo del lab:**
+```
+tar -tzvf system-backup.tar.gz
+```
+```
+-rw-rw-r-- labex/labex   0 2026-04-01 11:21 backup-list.txt
+```
+
+**Qué muestra cada columna:**
+
+| Columna | Ejemplo | Significa |
+|---------|---------|----------|
+| Permisos | `-rw-rw-r--` | Permisos del archivo al momento del respaldo |
+| Propietario | `labex/labex` | Usuario y grupo dueños del archivo |
+| Tamaño | `0` | Tamaño en bytes — `0` porque el archivo estaba vacío |
+| Fecha | `2026-04-01 11:21` | Cuándo fue modificado por última vez |
+| Nombre | `backup-list.txt` | Ruta del archivo dentro del tar |
+
+> Verificar un respaldo con `-t` antes de borrar los originales es un hábito de producción. No existe nada peor que hacer un `rm -rf` de los datos originales y descubrir que el tar estaba vacío o corrupto.
+
+**Guardar el inventario del respaldo:**
+```bash
+tar -tzvf system-backup.tar.gz > ~/project/backup-contents.txt
+```
+
+Esto redirige la lista a un archivo de texto. Sirve como prueba de auditoría: si alguien pregunta qué había en el respaldo del 1 de abril, tienes el inventario guardado.
+
+---
+
+#### `crontab` — Automatizar tareas programadas con cron
+
+**¿Qué es cron?**
+
+`cron` es el planificador de tareas de Linux. Es un servicio que corre silenciosamente en segundo plano (`crond`) y ejecuta comandos de forma automática en los momentos que le indiques — sin que nadie tenga que hacer nada. Es el mecanismo que hace posible que los respaldos ocurran solos cada noche, que los logs se roten cada semana, o que una alerta se envíe cada hora.
+
+Cada usuario del sistema tiene su propia tabla de tareas llamada **crontab** (cron table). Las tareas de un usuario solo corren con los permisos de ese usuario.
+
+**Sintaxis:**
+```
+crontab -e    # abrir el editor del crontab del usuario actual
+crontab -l    # listar las tareas programadas actuales
+crontab -r    # eliminar todo el crontab (cuidado — no pide confirmación)
+```
+
+**Ejemplo del lab:**
+```
+crontab -e
+```
+```
+no crontab for labex - using an empty one
+Select an editor: 2 (nano)
+```
+
+Se abre el editor con el crontab vacío. Al guardar, cron registra la tarea automáticamente.
+
+---
+
+#### Sintaxis de cron — cómo leer y escribir expresiones cron
+
+Cada línea del crontab tiene el formato:
+```
+minuto  hora  día_del_mes  mes  día_de_semana  comando
+```
+
+**Los 5 campos de tiempo:**
+
+| Campo | Rango | Ejemplo | Significa |
+|-------|-------|---------|----------|
+| Minuto | 0–59 | `30` | A los 30 minutos de la hora |
+| Hora | 0–23 | `2` | A las 2 AM |
+| Día del mes | 1–31 | `1` | El primer día del mes |
+| Mes | 1–12 | `*` | Todos los meses |
+| Día de semana | 0–7 | `1` | Lunes (0 y 7 son domingo) |
+
+**Caracteres especiales:**
+
+| Carácter | Significado | Ejemplo |
+|----------|------------|---------|
+| `*` | Cualquier valor — "siempre" | `* * * * *` = cada minuto |
+| `,` | Lista de valores | `1,15 * * * *` = al minuto 1 y al 15 |
+| `-` | Rango de valores | `9-17 * * * *` = cada minuto entre las 9 AM y 5 PM |
+| `/N` | Cada N unidades | `*/5 * * * *` = cada 5 minutos |
+
+**Ejemplos prácticos:**
+
+```
+# Cada minuto (para pruebas)
+* * * * * comando
+
+# Cada día a las 2 AM
+0 2 * * * comando
+
+# Cada lunes a las 8 AM
+0 8 * * 1 comando
+
+# Cada hora, en punto
+0 * * * * comando
+
+# Los días 1 y 15 de cada mes, a medianoche
+0 0 1,15 * * comando
+```
+
+---
+
+#### La tarea cron del lab — desglosada
+
+```
+* * * * * tar -czf /home/labex/project/backups/backup-$(date +\%Y-\%m-\%d_\%H-\%M-\%S).tar.gz -C /home/labex/project data config logs
+```
+
+Parte por parte:
+
+| Pieza | Qué hace |
+|-------|---------|
+| `* * * * *` | Se ejecuta cada minuto (modo prueba — en producción sería `0 2 * * *`) |
+| `tar -czf` | Crea un archivo comprimido |
+| `.../backup-$(date +...)` | El nombre del archivo incluye la fecha y hora exacta |
+| `\%Y-\%m-\%d_\%H-\%M-\%S` | Formato: `2026-04-01_11-26-00` — los `\%` escapan el `%` dentro de crontab |
+| `-C /home/labex/project` | Cambia a ese directorio antes de empaquetar |
+| `data config logs` | Los tres directorios que se incluyen en el respaldo |
+
+**¿Por qué `\%` en vez de `%`?**
+
+En crontab, el carácter `%` tiene un significado especial (separador de líneas de entrada). Para usarlo literalmente dentro de un comando — como en `date +%Y` — hay que escaparlo con `\%`. Si no lo haces, cron interpretará el `%` como fin del comando y el respaldo fallará silenciosamente.
+
+**El resultado en disco:**
+```
+backups/
+├── backup-2026-04-01_11-26-00.tar.gz
+├── backup-2026-04-01_11-27-00.tar.gz
+└── backup-2026-04-01_11-28-00.tar.gz
+```
+
+Cada ejecución genera un archivo con nombre único. No se sobrescriben — se acumulan. En producción, esto se complementa con una política de retención (borrar respaldos más viejos de N días).
+
+---
+
+#### Flujo completo de una estrategia de respaldo
+
+```
+1. Definir qué respaldar
+   mkdir -p data config logs
+        ↓
+2. Crear el respaldo
+   tar -czf backups/backup.tar.gz -C /ruta data config logs
+        ↓
+3. Verificar integridad
+   tar -tzvf backups/backup.tar.gz
+        ↓
+4. Guardar inventario como auditoría
+   tar -tzvf backups/backup.tar.gz > backup-contents.txt
+        ↓
+5. Automatizar con cron
+   crontab -e → agregar la tarea con fecha dinámica
+        ↓
+6. Verificar que cron la registró
+   crontab -l
+```
+
+---
+
+#### Errores frecuentes — Lab 09
+
+**Ejecutar `tar` desde el directorio equivocado**
+
+El error del lab: ejecutar `tar -czf backup.tar.gz archivo.txt` desde `backups/` cuando `archivo.txt` estaba en el directorio padre. `tar` busca los archivos relativos al directorio actual. La solución es usar rutas absolutas o la flag `-C` para indicar explícitamente el directorio base.
+
+**Olvidar `\%` en las expresiones de `date` dentro de crontab**
+
+Si escribes `date +%Y` en el crontab sin escapar, cron interpreta el `%` como un separador especial y el comando falla sin error visible en la terminal. Siempre usa `\%Y`, `\%m`, `\%d`, etc. dentro de crontab.
+
+**`crontab -r` en lugar de `crontab -e`**
+
+`-r` elimina todo el crontab sin pedir confirmación. Un typo entre `-e` y `-r` borra todas las tareas programadas del usuario. No hay deshacer. Si administras tareas críticas, guarda siempre una copia con `crontab -l > mis_crons.txt` antes de editar.
+
+**No verificar el respaldo antes de borrar los originales**
+
+Crear un tar y eliminar los originales sin antes hacer `tar -tzvf` para confirmar que el archivo es válido. Si el tar falló a mitad (por disco lleno, por ejemplo), los datos originales ya no existen.
+
+**`* * * * *` en producción**
+
+Una tarea que corre cada minuto genera 60 archivos por hora, 1440 por día. Sin política de retención que borre los viejos, llena el disco. En producción, los respaldos corren una vez al día (`0 2 * * *`) y se borra lo que supera N días de antigüedad.
+
+---
+
+#### Ejercicio — Lab 09
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux con acceso sudo.
+
+**Preparación:**
+```bash
+mkdir -p ~/practica-backup/{datos,config,logs,backups}
+echo "archivo importante" > ~/practica-backup/datos/reporte.txt
+echo "host=localhost" > ~/practica-backup/config/app.conf
+```
+
+**Tareas:**
+
+1. Desde `~/practica-backup/`, crea un respaldo comprimido de `datos/` y `config/` usando `-C` para no depender del directorio actual.
+2. Verifica el contenido del respaldo con `tar -tzvf` y confirma que ambos archivos aparecen.
+3. Guarda el inventario en `backups/inventario.txt` usando redirección.
+4. Usa `crontab -e` para programar una tarea que ejecute ese mismo comando cada día a las 3 AM. El nombre del archivo debe incluir la fecha con `date`.
+5. Verifica con `crontab -l` que la tarea quedó registrada.
+6. Simula manualmente la ejecución del comando (sin cron) para confirmar que genera el archivo con nombre dinámico.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+tar -czf ~/practica-backup/backups/backup.tar.gz \
+    -C ~/practica-backup datos config
+
+# Paso 2
+tar -tzvf ~/practica-backup/backups/backup.tar.gz
+
+# Paso 3
+tar -tzvf ~/practica-backup/backups/backup.tar.gz \
+    > ~/practica-backup/backups/inventario.txt
+cat ~/practica-backup/backups/inventario.txt
+
+# Paso 4 — dentro de crontab -e agregar:
+# 0 3 * * * tar -czf ~/practica-backup/backups/backup-$(date +\%Y-\%m-\%d).tar.gz -C ~/practica-backup datos config
+
+# Paso 5
+crontab -l
+
+# Paso 6
+tar -czf ~/practica-backup/backups/backup-$(date +%Y-%m-%d_%H-%M-%S).tar.gz \
+    -C ~/practica-backup datos config
+ls ~/practica-backup/backups/
+```
+
+</details>
+
+---
+
+### Lab 10 — Artesano de Scripts
+
+**Escenario:** El equipo tiene decenas de archivos `.log` que se acumulan cada día en un directorio. Copiarlos manualmente a un directorio de respaldo lleva tiempo y alguien siempre se olvida. Tu tarea: escribir un script de Bash que automatice todo el proceso — que verifique si el directorio de logs existe, pida el nombre del respaldo, copie cada archivo y reporte el progreso.
+
+> Un script de shell no es más que una lista de comandos guardados en un archivo que se ejecutan en orden. La diferencia con escribirlos uno a uno en la terminal es que puedes añadir lógica: *si pasa esto, haz aquello*, *para cada archivo, haz esto*. Ahí empieza la verdadera automatización.
+
+---
+
+#### ¿Qué es un script de Bash?
+
+Un script de Bash es un archivo de texto que contiene comandos de shell. Cuando lo ejecutas, el sistema los corre en secuencia de arriba hacia abajo, exactamente como si los escribieras tú mismo en la terminal — pero sin que tengas que estar presente.
+
+**Ciclo de vida de un script:**
+```
+1. Crear el archivo          → touch script.sh  o  nano script.sh
+2. Escribir los comandos     → (en el editor)
+3. Darle permiso de ejecución → chmod +x script.sh
+4. Ejecutarlo                → ./script.sh
+```
+
+El `./` al ejecutar es necesario. Sin él, el shell busca el comando en los directorios del `PATH` del sistema (como `/usr/bin/`), y tu script no está ahí. El `./` le dice explícitamente: *"el script está en el directorio actual"*.
+
+---
+
+#### La línea shebang — `#!/bin/bash`
+
+La primera línea de todo script de Bash debe ser:
+```bash
+#!/bin/bash
+```
+
+**Qué hace:** Le indica al sistema operativo qué intérprete debe usar para ejecutar el script. Sin esta línea, el sistema no sabe si el archivo es Bash, Python, Perl o cualquier otro lenguaje.
+
+| Parte | Significado |
+|-------|------------|
+| `#!` | Shebang — secuencia especial que el kernel reconoce al inicio de un archivo ejecutable |
+| `/bin/bash` | Ruta del intérprete que procesará el script |
+
+**Otros shebangs comunes:**
+```bash
+#!/usr/bin/env python3   # script de Python
+#!/bin/sh                # shell POSIX genérico (más portable que bash)
+#!/usr/bin/env bash      # bash desde el PATH — más portable entre distros
+```
+
+**El error del lab con la shebang:**
+```bash
+# Esto falla en zsh:
+echo "#!/bin/bash" > log_manager.sh
+zsh: event not found: /bin/bash
+
+# Esto funciona en cualquier shell:
+echo '#!/bin/bash' > log_manager.sh
+```
+
+Por qué falla con comillas dobles en zsh: el `!` dentro de `"..."` tiene significado especial en zsh — es el operador de historial (como en `!!`). Con comillas simples `'...'` el contenido se trata como texto literal sin interpretar nada.
+
+---
+
+#### Variables en Bash
+
+Una variable es un nombre que almacena un valor para usarlo más adelante. En Bash, se definen sin espacios alrededor del `=` y se acceden con `$`.
+
+**Sintaxis:**
+```bash
+NOMBRE_VARIABLE="valor"   # definir (sin espacios)
+echo $NOMBRE_VARIABLE      # usar (con $)
+echo "${NOMBRE_VARIABLE}"  # usar (forma recomendada — evita ambigüedades)
+```
+
+**Del script del lab:**
+```bash
+LOG_DIR="/home/labex/project/app_logs"
+BACKUP_DIR="/home/labex/project/backups"
+```
+
+Por qué usar variables en vez de escribir las rutas directamente en cada línea:
+- Si la ruta cambia, solo la cambias en un lugar
+- El código es más legible — `$LOG_DIR` es más claro que `/home/labex/project/app_logs`
+- Evitas errores de tipeo al repetir la ruta
+
+> Convención: las variables de configuración se escriben en `MAYÚSCULAS`. Las variables locales dentro de funciones suelen ser `minúsculas`. No es obligatorio, pero es el estándar que verás en producción.
+
+---
+
+#### `read` — Capturar entrada del usuario
+
+**Sintaxis:**
+```bash
+read NOMBRE_VARIABLE
+read -p "Mensaje: " NOMBRE_VARIABLE   # con mensaje en la misma línea
+```
+
+**Qué hace:** Pausa la ejecución del script y espera a que el usuario escriba algo y presione Enter. Lo que escriba queda guardado en la variable indicada.
+
+**Del script del lab:**
+```bash
+echo "Enter the backup filename: "
+read BACKUP_FILENAME
+
+echo "Backing up logs to: $BACKUP_FILENAME"
+```
+
+Cuando ejecutaste el script e ingresaste `backups`, la variable `BACKUP_FILENAME` tomó el valor `"backups"` y la siguiente línea imprimió `Backing up logs to: backups`.
+
+> En scripts de producción, `read` se usa para confirmar operaciones peligrosas o para pedir credenciales. Para contraseñas, se usa `read -s` que oculta lo que escribe el usuario.
+
+---
+
+#### `if` — Tomar decisiones según una condición
+
+**Sintaxis:**
+```bash
+if [ condición ]; then
+    # comandos si la condición es verdadera
+else
+    # comandos si la condición es falsa
+fi
+```
+
+**Regla crítica:** Siempre hay espacios dentro de los corchetes: `[ condición ]`. Sin el espacio después de `[` y antes de `]`, Bash falla.
+
+**El error del lab:**
+```
+./log_manager.sh: line 4: [-d: command not found
+```
+
+La causa: se escribió `[-d "$LOG_DIR"]` sin espacio — Bash intentó ejecutar un comando llamado `[-d` que no existe. La corrección es `[ -d "$LOG_DIR" ]` con espacios en ambos lados.
+
+**Del script del lab:**
+```bash
+if [ -d "$LOG_DIR" ]; then
+    echo "Log directory found. Proceeding..."
+    # ... resto del trabajo
+else
+    echo "Error: Log directory not found."
+    exit 1
+fi
+```
+
+**Operadores de prueba más comunes en `[ ]`:**
+
+| Operador | Qué verifica | Ejemplo |
+|----------|-------------|---------|
+| `-d ruta` | Si la ruta es un **directorio** que existe | `[ -d "/var/log" ]` |
+| `-f ruta` | Si la ruta es un **archivo** que existe | `[ -f "config.txt" ]` |
+| `-e ruta` | Si la ruta **existe** (archivo o directorio) | `[ -e "/tmp/lock" ]` |
+| `-z "$var"` | Si la variable está **vacía** | `[ -z "$INPUT" ]` |
+| `-n "$var"` | Si la variable **no está vacía** | `[ -n "$NAME" ]` |
+| `"$a" = "$b"` | Si dos cadenas son **iguales** | `[ "$RESP" = "y" ]` |
+| `$n -eq $m` | Si dos números son **iguales** | `[ $COUNT -eq 0 ]` |
+| `$n -gt $m` | Si un número es **mayor** que otro | `[ $SIZE -gt 100 ]` |
+
+**`exit 1` — salir con error:**
+
+Cuando un script termina con `exit 0`, indica éxito. Con `exit 1` (o cualquier número diferente de cero), indica que algo salió mal. Esto es útil cuando el script es llamado por otro script o por cron — el llamador puede saber si el script funcionó o falló.
+
+---
+
+#### `for` — Repetir una acción para cada elemento
+
+**Sintaxis:**
+```bash
+for VARIABLE in lista; do
+    # comandos usando $VARIABLE
+done
+```
+
+**Qué hace:** Ejecuta el bloque de comandos entre `do` y `done` una vez por cada elemento de la lista. En cada iteración, `VARIABLE` toma el valor del elemento actual.
+
+**Del script del lab:**
+```bash
+for file in "$LOG_DIR"/*.log; do
+    cp "$file" "$BACKUP_DIR"
+    echo "Copied $file"
+done
+```
+
+Paso a paso, lo que ocurre:
+
+1. `"$LOG_DIR"/*.log` expande a todos los archivos `.log` en el directorio — en el lab: `access.log`, `debug.log`, `error.log`
+2. En la primera iteración: `$file` = `/home/labex/project/app_logs/access.log`
+3. Se copia ese archivo al directorio de backups
+4. Se imprime `Copied /home/labex/project/app_logs/access.log`
+5. Se repite para `debug.log` y `error.log`
+
+**Por qué `"$file"` con comillas:** Si el nombre de un archivo contiene espacios (ej. `my log.log`), sin comillas Bash lo interpretaría como dos argumentos separados. Las comillas protegen el valor completo.
+
+**Otros usos del `for`:**
+```bash
+# Iterar sobre una lista fija
+for color in rojo verde azul; do
+    echo "Color: $color"
+done
+
+# Iterar sobre números
+for i in 1 2 3 4 5; do
+    echo "Número $i"
+done
+
+# Con rango (Bash 3+)
+for i in {1..10}; do
+    echo "Iteración $i"
+done
+```
+
+---
+
+#### El script completo — línea por línea
+
+```bash
+#!/bin/bash
+```
+Le dice al sistema que este archivo debe ejecutarse con `/bin/bash`.
+
+```bash
+LOG_DIR="/home/labex/project/app_logs"
+BACKUP_DIR="/home/labex/project/backups"
+```
+Define las rutas como variables. Si el día de mañana los directorios cambian, solo se modifica aquí.
+
+```bash
+echo "Log Manager Initialized."
+```
+Imprime un mensaje de inicio — confirma visualmente que el script arrancó.
+
+```bash
+if [ -d "$LOG_DIR" ]; then
+```
+Verifica que el directorio de logs **existe y es un directorio**. Si no existe, no tiene sentido continuar.
+
+```bash
+    echo "Log directory found. Proceeding..."
+    echo "Enter the backup filename: "
+    read BACKUP_FILENAME
+```
+Confirma que encontró el directorio y pide el nombre del respaldo al usuario.
+
+```bash
+    echo "Backing up logs to: $BACKUP_FILENAME"
+```
+Informa al usuario a dónde irán los archivos.
+
+```bash
+    for file in "$LOG_DIR"/*.log; do
+        cp "$file" "$BACKUP_DIR"
+        echo "Copied $file"
+    done
+```
+El corazón del script: itera sobre cada `.log` del directorio, lo copia al destino y reporta.
+
+```bash
+    echo "Backup complete."
+else
+    echo "Error: Log directory not found."
+    exit 1
+fi
+```
+Mensaje de éxito si todo fue bien. Si el directorio no existía, muestra el error y sale con código 1.
+
+---
+
+#### Flujo de ejecución del script
+
+Para entender cómo el script "sabe" cuándo crear el backup:
+
+```
+./log_manager.sh
+        ↓
+¿Existe $LOG_DIR?
+    ├── NO → imprime error, exit 1 (termina aquí)
+    └── SÍ → imprime "found"
+              ↓
+         Pide nombre al usuario (read)
+              ↓
+         Para CADA archivo *.log en $LOG_DIR:
+              cp archivo → $BACKUP_DIR
+              imprime "Copied archivo"
+              ↓
+         imprime "Backup complete."
+```
+
+El script no tiene lógica de fecha ni decide solo cuándo crear el backup — eso lo hacía el cron del Lab 09. Este script hace **el trabajo de copiar**; el *cuándo* lo decide quien llama al script (un humano o cron).
+
+---
+
+#### Errores frecuentes — Lab 10
+
+**`echo "#!/bin/bash"` falla en zsh con `event not found`**
+
+El `!` tiene significado especial en zsh (operador de historial). Al estar dentro de comillas dobles, zsh intenta expandirlo. La solución: siempre usar comillas simples `'#!/bin/bash'` cuando se escribe la shebang con `echo`, o simplemente abrir el editor directamente con `nano script.sh`.
+
+**`[-d "$VAR"]` sin espacios dentro de los corchetes**
+
+`[` en Bash es en realidad un comando, no un símbolo de agrupación. Necesita espacios a sus lados como cualquier otro comando. `[-d` lo interpreta como un comando llamado `[-d` que no existe. Siempre `[ -d "$VAR" ]`.
+
+**Script creado pero no ejecuta: `Permission denied`**
+
+El archivo existe pero no tiene permiso de ejecución. `chmod +x script.sh` lo soluciona. Verificar con `ls -l`: debe aparecer `x` en los permisos (`-rwxrwxr-x`).
+
+**Variables sin comillas dentro de `[ ]`**
+
+Si `$LOG_DIR` estuviera vacío o tuviera espacios, `[ -d $LOG_DIR ]` sin comillas podría interpretarse mal. La forma segura es siempre `[ -d "$LOG_DIR" ]` con comillas dobles.
+
+**`exit 1` en el camino correcto**
+
+Si por error pones `exit 1` dentro del bloque `then` (éxito) en vez del bloque `else`, el script termina con error incluso cuando todo funciona bien. Revisar bien dónde está cada bloque.
+
+---
+
+#### Ejercicio — Lab 10
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux con Bash.
+
+**Preparación:**
+```bash
+mkdir -p ~/practica-script/{reportes,archivo}
+touch ~/practica-script/reportes/enero.txt
+touch ~/practica-script/reportes/febrero.txt
+touch ~/practica-script/reportes/marzo.txt
+```
+
+**Tareas:**
+
+Escribe un script llamado `archivar.sh` que haga lo siguiente:
+1. Defina dos variables: `ORIGEN` (la carpeta `reportes`) y `DESTINO` (la carpeta `archivo`).
+2. Verifique que `$ORIGEN` existe — si no, imprima un error y salga con `exit 1`.
+3. Pida al usuario con qué texto quiere filtrar (ej. `enero`). Guárdalo en `FILTRO`.
+4. Use un `for` para copiar solo los archivos `.txt` cuyo nombre contenga `$FILTRO` al directorio `$DESTINO`.
+5. Imprima cuántos archivos copió.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+#!/bin/bash
+
+ORIGEN="/root/practica-script/reportes"
+DESTINO="/root/practica-script/archivo"
+
+if [ ! -d "$ORIGEN" ]; then
+    echo "Error: directorio $ORIGEN no existe."
+    exit 1
+fi
+
+echo "¿Qué archivos quieres archivar? (escribe parte del nombre):"
+read FILTRO
+
+COUNT=0
+for file in "$ORIGEN"/*"$FILTRO"*.txt; do
+    if [ -f "$file" ]; then
+        cp "$file" "$DESTINO"
+        echo "Archivado: $file"
+        COUNT=$((COUNT + 1))
+    fi
+done
+
+echo "Total archivados: $COUNT"
+```
+
+```bash
+chmod +x archivar.sh
+./archivar.sh
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -2227,6 +2913,20 @@ dpkg -s cowsay
 | `apt show paquete` | Muestra info del paquete desde el repositorio | 08 |
 | `dpkg -s paquete` | Verifica si un paquete está instalado y su versión | 08 |
 | `apt list --installed` | Lista todos los paquetes instalados en el sistema | 08 |
+| `tar -czf backup.tar.gz -C /ruta dir` | Crea respaldo comprimido cambiando de directorio primero | 09 |
+| `tar -tzvf archivo.tar.gz` | Lista contenido del tar con permisos, fecha y tamaño | 09 |
+| `tar -tzvf arch.tar.gz > inventario.txt` | Guarda el inventario del respaldo en un archivo | 09 |
+| `crontab -e` | Abre el editor del crontab del usuario actual | 09 |
+| `crontab -l` | Lista las tareas cron programadas del usuario | 09 |
+| `crontab -r` | Elimina todo el crontab sin confirmación — usar con cuidado | 09 |
+| `date +%Y-%m-%d_%H-%M-%S` | Genera una cadena de fecha y hora para nombres dinámicos | 09 |
+| `chmod +x script.sh` | Da permiso de ejecución a un script | 10 |
+| `./script.sh` | Ejecuta un script en el directorio actual | 10 |
+| `read VARIABLE` | Pausa el script y guarda la entrada del usuario en la variable | 10 |
+| `if [ -d "$DIR" ]; then` | Verifica si un directorio existe antes de continuar | 10 |
+| `if [ -f "$FILE" ]; then` | Verifica si un archivo existe | 10 |
+| `for f in ruta/*.ext; do` | Itera sobre todos los archivos que coincidan con el patrón | 10 |
+| `exit 0` / `exit 1` | Termina el script con código de éxito o error | 10 |
 
 ---
 
@@ -2308,6 +3008,32 @@ dpkg -s cowsay
 | **`Hit:` en apt update** | El repositorio no cambió desde la última sincronización |
 | **`Get:` en apt update** | Hay nueva información disponible — la descarga |
 | **`Status: install ok installed`** | Estado de dpkg que confirma que el paquete está correctamente instalado |
+| **`cron`** | Servicio del sistema que ejecuta comandos automáticamente en momentos programados |
+| **`crontab`** | Tabla de tareas de cron — cada usuario tiene la suya con sus propios permisos |
+| **`crond`** | El proceso daemon de cron que corre en segundo plano y vigila las tareas |
+| **Expresión cron** | Los 5 campos de tiempo: `minuto hora día mes día_semana` |
+| **`* * * * *`** | Comodín en cron — significa "cualquier valor" o "siempre" en ese campo |
+| **`\%` en crontab** | El `%` debe escaparse dentro de crontab — sin el `\`, cron lo interpreta mal |
+| **`date +%Y-%m-%d`** | Comando que genera la fecha actual en formato `2026-04-01` |
+| **Nombre dinámico** | Nombre de archivo que incluye la fecha/hora para evitar sobreescribir respaldos anteriores |
+| **Política de retención** | Regla que define cuántos días o cuántas copias de respaldo se conservan antes de borrar las viejas |
+| **`-C ruta` en tar** | Cambia al directorio indicado antes de empaquetar — evita errores de ruta relativa |
+| **Inventario de respaldo** | Archivo que registra qué contenía un respaldo — sirve como prueba de auditoría |
+| **Script de Bash** | Archivo de texto con comandos de shell que se ejecutan en secuencia |
+| **Shebang** | Línea `#!/bin/bash` al inicio de un script — indica al SO qué intérprete usar |
+| **`#!`** | Secuencia especial que el kernel reconoce para identificar el intérprete de un script |
+| **Variable de Bash** | Nombre que almacena un valor — se define con `VAR=valor` y se usa con `$VAR` |
+| **`read`** | Comando de Bash que pausa el script y captura la entrada del usuario |
+| **`if [ ]`** | Estructura condicional de Bash — ejecuta comandos si se cumple una condición |
+| **`[ -d ruta ]`** | Prueba si una ruta es un directorio existente |
+| **`[ -f ruta ]`** | Prueba si una ruta es un archivo existente |
+| **`for ... in ... do`** | Bucle que repite un bloque de comandos para cada elemento de una lista |
+| **`exit 0`** | El script terminó sin errores |
+| **`exit 1`** | El script terminó con error — señal para quien lo llamó (otro script o cron) |
+| **`./script.sh`** | Ejecutar un script del directorio actual — el `./` es necesario porque el dir actual no está en PATH |
+| **`chmod +x`** | Agrega permiso de ejecución a un archivo — necesario antes de correr un script |
+| **Glob `*.ext`** | Patrón que el shell expande a todos los archivos con esa extensión en el directorio |
+| **Código de salida** | Número que un proceso retorna al terminar: `0` = éxito, distinto de `0` = error |
 
 ---
 
