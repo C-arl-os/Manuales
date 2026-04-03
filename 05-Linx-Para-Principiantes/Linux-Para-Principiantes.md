@@ -12,6 +12,7 @@
 - [Cómo usar este manual](#cómo-usar-este-manual)
 - [Labs](#labs)
   - [Lab 01 — Tu Primera Terminal](#lab-01--tu-primera-terminal)
+  - [Lab 02 — Navegar y Gestionar Archivos](#lab-02--navegar-y-gestionar-archivos)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -413,6 +414,421 @@ echo "Terminal lista"
 
 ---
 
+### Lab 02 — Navegar y Gestionar Archivos
+
+**Escenario:** Ya sabes hablar con la terminal. Ahora el siguiente paso es moverte por el sistema de archivos como si fuera tu propio escritorio: saber dónde estás, ir a donde necesitas, crear carpetas y archivos, y manipularlos. También aprenderás a pedir ayuda directamente al sistema cuando no recuerdes cómo funciona un comando.
+
+> El sistema de archivos de Linux es un árbol que parte desde la raíz `/`. Todo lo que existe en el sistema — programas, configuraciones, documentos, dispositivos — es un nodo de ese árbol. Navegar ese árbol es la habilidad más fundamental de Linux.
+
+---
+
+#### El trío de navegación: `pwd`, `cd`, `ls`
+
+Estos tres comandos son los que más vas a usar en cualquier sesión de terminal. Se usan juntos de manera natural: `pwd` para saber dónde estás, `cd` para moverte, y `ls` para ver qué hay.
+
+---
+
+#### `pwd` — Saber en qué directorio estás
+
+**Sintaxis:**
+```
+pwd
+```
+
+**Qué hace:** Imprime la ruta absoluta del directorio actual. `pwd` significa *Print Working Directory* — el "directorio de trabajo" es el lugar del sistema de archivos donde se ejecutan tus comandos en este momento.
+
+**Ejemplo del lab:**
+```
+pwd
+```
+```
+/home/labex/project
+```
+
+```
+cd ~
+pwd
+```
+```
+/home/labex
+```
+
+> `pwd` es tu brújula. Cuando te pierdas o no recuerdes dónde estás, `pwd` te lo dice al instante. Es especialmente útil después de varios `cd` encadenados o cuando trabajas con rutas largas.
+
+---
+
+#### `cd` — Cambiar de directorio
+
+**Sintaxis:**
+```
+cd ruta            # ir a una ruta específica
+cd ~               # ir al home del usuario actual
+cd ..              # subir un nivel (directorio padre)
+cd -               # volver al directorio anterior
+cd                 # sin argumentos: ir al home (igual que cd ~)
+```
+
+**Qué hace:** Cambia el directorio de trabajo actual. Después de `cd`, todos los comandos relativos operan desde la nueva ubicación.
+
+**Ejemplos del lab:**
+```bash
+cd ~               # va a /home/labex
+cd project         # entra a /home/labex/project (ruta relativa)
+```
+
+**Atajos de `cd` que debes memorizar:**
+
+| Comando | A dónde va |
+|---------|-----------|
+| `cd ~` | Tu directorio home (`/home/tu_usuario`) |
+| `cd ..` | Un nivel arriba |
+| `cd ../..` | Dos niveles arriba |
+| `cd -` | Al directorio donde estabas antes — como el botón "atrás" |
+| `cd /` | La raíz del sistema |
+| `cd /var/log` | Ruta absoluta — funciona desde cualquier lugar |
+
+**Ruta relativa vs ruta absoluta:**
+
+```bash
+# Ruta absoluta — empieza con /
+cd /home/labex/project      # funciona desde cualquier lugar del sistema
+
+# Ruta relativa — empieza desde donde estás ahora
+cd project                  # solo funciona si "project" existe en el dir actual
+cd ../project               # sube un nivel y entra a "project"
+```
+
+> `cd -` es uno de los atajos más subestimados. Si estabas en `/etc/nginx/` y fuiste a `/var/log/` para revisar un log, `cd -` te regresa a `/etc/nginx/` sin tener que escribirlo de nuevo.
+
+---
+
+#### `ls` — Listar el contenido de un directorio
+
+**Sintaxis:**
+```
+ls                  # archivos del directorio actual
+ls ruta             # archivos de otra ruta sin moverse
+ls -l               # formato largo con permisos, tamaño y fecha
+ls -a               # incluye archivos ocultos (los que empiezan con .)
+ls -lh              # formato largo con tamaños legibles (KB, MB, GB)
+ls -lt              # ordenado por fecha de modificación (más reciente primero)
+ls -R               # lista recursiva incluyendo subdirectorios
+```
+
+**Ejemplo del lab:**
+```bash
+ls *.txt            # solo archivos con extensión .txt
+ls ..               # contenido del directorio padre sin moverse
+```
+```
+file2.txt  hello.txt   note_2.txt  note_4.txt
+file3.txt  note_1.txt  note_3.txt  note_5.txt
+```
+
+```
+ls ..
+```
+```
+hello_copy.txt  linux_practice
+```
+
+**Pedir ayuda directamente a `ls`:**
+```
+ls --help
+```
+
+Esto imprime la página de ayuda completa del comando con todas sus opciones. En el lab la viste — es larga porque `ls` tiene docenas de flags. Lo importante es que **todos los comandos de Linux aceptan `--help`**.
+
+---
+
+#### `mkdir` — Crear directorios
+
+**Sintaxis:**
+```
+mkdir nombre                    # crea un directorio
+mkdir -p ruta/anidada/completa  # crea toda la estructura aunque no exista
+mkdir dir1 dir2 dir3            # crea varios directorios a la vez
+```
+
+**Qué hace:** Crea uno o más directorios en el sistema de archivos.
+
+**Ejemplo del lab:**
+```bash
+mkdir linux_practice
+cd linux_practice
+```
+
+**El flag `-p` es el más importante:**
+```bash
+mkdir proyectos/web/frontend   # falla si "proyectos/" o "web/" no existen
+mkdir -p proyectos/web/frontend  # crea toda la cadena sin importar si existe
+```
+
+> `-p` también significa que no da error si el directorio ya existe. Por eso `mkdir -p` es la forma estándar en scripts — nunca falla por directorios que ya están ahí.
+
+---
+
+#### `touch` — Crear archivos vacíos (y más)
+
+**Sintaxis:**
+```
+touch archivo.txt               # crea un archivo vacío
+touch a.txt b.txt c.txt         # crea varios archivos a la vez
+touch nota_{1..5}.txt           # crea 5 archivos con expansión de llaves
+```
+
+**Qué hace:** Si el archivo no existe, lo crea vacío. Si ya existe, actualiza su fecha de última modificación sin cambiar el contenido.
+
+**Ejemplos del lab:**
+```bash
+touch hello.txt                 # crea un archivo vacío
+touch file1.txt file2.txt file3.txt   # tres archivos de una vez
+touch note_{1..5}.txt           # crea note_1.txt hasta note_5.txt
+```
+
+**La expansión de llaves `{1..5}` — generar secuencias**
+
+Esta es una característica del shell (no de `touch` en sí). Antes de ejecutar el comando, el shell expande `{1..5}` en `1 2 3 4 5`, generando el nombre completo de cada archivo:
+
+```bash
+touch note_{1..5}.txt
+# el shell lo convierte en:
+touch note_1.txt note_2.txt note_3.txt note_4.txt note_5.txt
+```
+
+**Más usos de la expansión de llaves:**
+```bash
+touch reporte_{enero,febrero,marzo}.txt   # nombres específicos
+mkdir -p proyecto/{src,test,docs}          # estructura de proyecto de una vez
+echo {a..z}                               # letras de a a z
+echo {01..12}                             # números con ceros: 01 02 ... 12
+```
+
+> La expansión de llaves es una de las características más poderosas del shell para evitar repetición. En vez de crear 12 directorios uno a uno, `mkdir -p mes_{01..12}` los crea todos en un comando.
+
+---
+
+#### Comodines (wildcards) — Seleccionar múltiples archivos
+
+Los comodines son patrones que el shell expande antes de ejecutar el comando. No los procesa el comando en sí — los expande el shell y le pasa la lista resultante.
+
+**Comodines principales:**
+
+| Patrón | Qué selecciona | Ejemplo |
+|--------|---------------|---------|
+| `*` | Cualquier cantidad de caracteres | `ls *.txt` → todos los .txt |
+| `?` | Exactamente un carácter | `ls fil?.txt` → file1.txt, file2.txt |
+| `[abc]` | Uno de los caracteres entre corchetes | `ls [fh]*.txt` → file.txt, hello.txt |
+| `[1-5]` | Un carácter en el rango | `ls note_[1-3].txt` → note_1 a note_3 |
+
+**Ejemplos del lab:**
+```bash
+ls *.txt        # todos los archivos que terminan en .txt
+ls note*        # todos los que empiezan con "note"
+```
+```
+note_1.txt  note_2.txt  note_3.txt  note_4.txt  note_5.txt
+```
+
+> Los comodines no son exclusivos de `ls`. Funcionan con cualquier comando: `rm *.log`, `cp nota_* respaldo/`, `cat report_*.txt`. El shell siempre los expande antes de pasarlos al comando.
+
+---
+
+#### `cp` — Copiar archivos y directorios
+
+**Sintaxis:**
+```
+cp origen destino           # copia un archivo
+cp origen directorio/       # copia dentro de un directorio
+cp -r directorio/ destino/  # copia un directorio completo (recursivo)
+cp -p origen destino        # preserva permisos y fechas originales
+```
+
+**Ejemplo del lab:**
+```bash
+cp hello.txt hello_copy.txt    # crea una copia en el mismo directorio
+mv hello_copy.txt ..           # mueve la copia al directorio padre
+```
+
+> `cp` sin `-r` falla con directorios — da el error `omitting directory`. Siempre usa `cp -r` cuando copies carpetas.
+
+---
+
+#### `mv` — Mover o renombrar
+
+**Sintaxis:**
+```
+mv origen destino_archivo    # renombra el archivo
+mv origen directorio/        # mueve el archivo a ese directorio
+mv dir1/ dir2/               # mueve o renombra directorios
+```
+
+**Qué hace:** Mueve un archivo o directorio a otra ubicación. Si el destino es un nombre de archivo en el mismo directorio, lo renombra. Si el destino es un directorio existente, lo mueve dentro.
+
+**Ejemplo del lab:**
+```bash
+mv hello_copy.txt ..     # mueve hello_copy.txt al directorio padre
+```
+
+**`mv` como herramienta de renombrado:**
+```bash
+mv informe_final.txt informe_v2.txt    # renombra el archivo
+mv carpeta_vieja/ carpeta_nueva/        # renombra el directorio
+```
+
+> `mv` no tiene papelera — si mueves un archivo encima de otro que ya existe, el segundo se sobreescribe sin aviso. Usa `mv -i` para que pida confirmación antes de sobreescribir.
+
+---
+
+#### `rm` — Eliminar archivos
+
+**Sintaxis:**
+```
+rm archivo              # elimina un archivo
+rm -r directorio/       # elimina un directorio y todo su contenido
+rm -i archivo           # pide confirmación antes de borrar
+rm -f archivo           # fuerza la eliminación sin confirmación
+```
+
+**Ejemplo del lab:**
+```bash
+rm file1.txt            # elimina file1.txt permanentemente
+```
+
+> **`rm` no tiene papelera.** No hay forma de recuperar lo borrado desde la terminal a menos que tengas un respaldo. Siempre verifica con `ls` antes de `rm`, especialmente con comodines. `rm *.txt` es muy diferente a `rm * .txt` (con espacio — ese espacio borra todo).
+
+---
+
+#### Cómo pedir ayuda al sistema: `--help` y `man`
+
+Uno de los superpoderes de Linux es que trae su propia documentación integrada. No necesitas buscar en internet — el manual está en el sistema.
+
+**`--help` — ayuda rápida**
+```
+ls --help
+cp --help
+rm --help
+```
+
+Casi todos los comandos de Linux aceptan `--help`. Muestra un resumen de las opciones disponibles directamente en la terminal. Es lo primero que debes intentar cuando no recuerdas una flag.
+
+**`man` — el manual completo**
+```
+man ls
+man cp
+man mkdir
+```
+
+`man` abre la página del manual completa del comando. Es más detallada que `--help` e incluye ejemplos, advertencias y notas técnicas.
+
+**Cómo navegar dentro de `man`:**
+
+| Tecla | Acción |
+|-------|--------|
+| `Espacio` o `f` | Avanzar una página |
+| `b` | Retroceder una página |
+| `/término` | Buscar un término dentro del manual |
+| `n` | Ir a la siguiente coincidencia de búsqueda |
+| `q` | Salir del manual |
+
+**Ejemplo del lab:**
+```bash
+man ls    # abre el manual completo de ls
+man cp    # abre el manual completo de cp
+```
+
+> La diferencia entre un principiante y alguien avanzado no es memorizar todos los flags — es saber dónde buscarlos. `man comando` siempre tiene la respuesta correcta y actualizada para la versión instalada en tu sistema.
+
+---
+
+#### `tail -f /dev/null` — ¿Qué fue eso?
+
+En el lab ejecutaste `tail -f /dev/null` y tuviste que cancelarlo con `Ctrl+C`. Aunque no era el foco del lab, vale la pena entenderlo:
+
+- `tail -f archivo` sigue un archivo en tiempo real — muestra nuevas líneas conforme se agregan (muy útil para monitorear logs)
+- `/dev/null` es un dispositivo especial que siempre está vacío y nunca recibe datos
+- Combinados: `tail -f /dev/null` espera indefinidamente sin hacer nada — es un truco para mantener un proceso vivo o simplemente bloquear la terminal hasta `Ctrl+C`
+
+> `Ctrl+C` es la forma de interrumpir cualquier proceso que esté corriendo en la terminal. Es la tecla de emergencia más importante de Linux.
+
+---
+
+#### Errores frecuentes — Lab 02
+
+**`cd proyecto` cuando estás en el directorio equivocado**
+
+`cd` usa rutas relativas — busca `proyecto` dentro del directorio actual. Si no estás en el directorio correcto, fallará con `No such file or directory`. Usa `pwd` para saber dónde estás y `ls` para confirmar que el directorio existe antes de entrar.
+
+**`rm *.txt` borra más de lo esperado**
+
+Si hay archivos `.txt` que no querías borrar, ya es tarde. Antes de `rm` con comodines, ejecuta primero `ls *.txt` para ver exactamente qué va a seleccionar el patrón. Solo si la lista es lo que esperas, ejecutas el `rm`.
+
+**`cp hello.txt ..` en vez de `mv hello.txt ..`**
+
+`cp` copia (el original queda), `mv` mueve (el original desaparece). Son operaciones distintas. Si querías mover y usaste `cp`, tienes un duplicado — elimina el original con `rm`.
+
+**`mkdir ruta/anidada` sin `-p`**
+
+Sin `-p`, `mkdir` solo crea el último nivel — y falla si los niveles intermedios no existen. Siempre usa `mkdir -p` cuando crees estructuras de más de un nivel.
+
+---
+
+#### Ejercicio — Lab 02
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Tareas:**
+
+1. Usa `pwd` para confirmar en qué directorio estás.
+2. Crea la siguiente estructura de directorios con un solo comando usando `-p`:
+   `~/practica/notas/personales/` y `~/practica/notas/trabajo/`
+3. Entra a `~/practica/notas/` y crea 5 archivos llamados `semana_{1..5}.txt`.
+4. Usa un comodín para listar solo los archivos que empiecen con `semana_`.
+5. Copia `semana_1.txt` a la carpeta `personales/` con el nombre `semana_1_copia.txt`.
+6. Mueve `semana_5.txt` a la carpeta `trabajo/`.
+7. Elimina `semana_2.txt`.
+8. Verifica el resultado con `ls -lR ~/practica/`.
+9. Consulta el manual de `rm` con `man rm` y busca la flag `-i`. ¿Para qué sirve?
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+pwd
+
+# Paso 2
+mkdir -p ~/practica/notas/personales ~/practica/notas/trabajo
+
+# Paso 3
+cd ~/practica/notas
+touch semana_{1..5}.txt
+
+# Paso 4
+ls semana_*
+
+# Paso 5
+cp semana_1.txt personales/semana_1_copia.txt
+
+# Paso 6
+mv semana_5.txt trabajo/
+
+# Paso 7
+rm semana_2.txt
+
+# Paso 8
+ls -lR ~/practica/
+
+# Paso 9
+man rm
+# dentro del manual: /\-i y presiona Enter para buscar
+# -i  prompt before every removal
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -428,6 +844,26 @@ echo "Terminal lista"
 | `figlet "texto"` | Convierte texto en arte ASCII | 01 |
 | `figlet -f fuente "texto"` | Arte ASCII con tipografía específica | 01 |
 | `clear` | Limpia la pantalla de la terminal | 01 |
+| `pwd` | Muestra el directorio de trabajo actual | 02 |
+| `cd ruta` | Cambia al directorio indicado | 02 |
+| `cd ~` | Va al home del usuario | 02 |
+| `cd ..` | Sube un nivel al directorio padre | 02 |
+| `cd -` | Vuelve al directorio anterior | 02 |
+| `ls` | Lista archivos del directorio actual | 02 |
+| `ls -lh` | Lista con permisos y tamaños legibles | 02 |
+| `ls *.ext` | Lista solo los archivos que coinciden con el patrón | 02 |
+| `ls ruta` | Lista el contenido de otra ruta sin moverse | 02 |
+| `mkdir nombre` | Crea un directorio | 02 |
+| `mkdir -p ruta/anidada` | Crea toda la estructura de directorios | 02 |
+| `touch archivo.txt` | Crea un archivo vacío | 02 |
+| `touch a_{1..5}.txt` | Crea 5 archivos con expansión de llaves | 02 |
+| `cp origen destino` | Copia un archivo | 02 |
+| `cp -r dir/ destino/` | Copia un directorio completo | 02 |
+| `mv origen destino` | Mueve o renombra un archivo | 02 |
+| `rm archivo` | Elimina un archivo permanentemente | 02 |
+| `rm -r directorio/` | Elimina un directorio y todo su contenido | 02 |
+| `comando --help` | Muestra la ayuda rápida del comando | 02 |
+| `man comando` | Abre el manual completo del comando | 02 |
 
 ---
 
@@ -507,3 +943,21 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **Unix timestamp** | Número de segundos transcurridos desde el 1 de enero de 1970 — base del tiempo en sistemas Unix |
 | **Epoch** | El momento de referencia del tiempo Unix: `1970-01-01 00:00:00 UTC` |
 | **`/etc/motd`** | Message Of The Day — texto que se muestra al iniciar sesión en un servidor |
+| **`pwd`** | Print Working Directory — muestra la ruta absoluta del directorio actual |
+| **Directorio de trabajo** | El directorio desde donde se ejecutan tus comandos en este momento |
+| **`cd`** | Change Directory — cambia el directorio de trabajo |
+| **`ls`** | List — lista el contenido de un directorio |
+| **`mkdir`** | Make Directory — crea uno o más directorios |
+| **`touch`** | Crea un archivo vacío o actualiza la fecha de modificación de uno existente |
+| **`cp`** | Copy — copia archivos o directorios |
+| **`mv`** | Move — mueve o renombra archivos y directorios |
+| **`rm`** | Remove — elimina archivos o directorios (sin papelera) |
+| **Comodín (wildcard)** | Patrón que el shell expande antes de ejecutar el comando — `*`, `?`, `[]` |
+| **`*`** | Comodín que representa cualquier cantidad de caracteres |
+| **`?`** | Comodín que representa exactamente un carácter |
+| **Expansión de llaves** | Sintaxis `{1..5}` o `{a,b,c}` que el shell expande en una lista antes de ejecutar |
+| **`man`** | Manual — muestra la documentación completa de un comando |
+| **`--help`** | Flag que muestra la ayuda rápida de un comando |
+| **`/dev/null`** | Dispositivo especial que descarta todo lo que se escribe en él — siempre vacío |
+| **`Ctrl+C`** | Atajo para interrumpir (cancelar) el proceso que se está ejecutando |
+| **`tail -f`** | Sigue un archivo en tiempo real mostrando nuevas líneas conforme aparecen |
