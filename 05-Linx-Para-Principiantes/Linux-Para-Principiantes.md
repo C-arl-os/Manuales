@@ -14,6 +14,7 @@
   - [Lab 01 — Tu Primera Terminal](#lab-01--tu-primera-terminal)
   - [Lab 02 — Navegar y Gestionar Archivos](#lab-02--navegar-y-gestionar-archivos)
   - [Lab 03 — Cómo Pedir Ayuda en Linux](#lab-03--cómo-pedir-ayuda-en-linux)
+  - [Lab 04 — Desafío de Operaciones de Archivos](#lab-04--desafío-de-operaciones-de-archivos)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -1149,6 +1150,272 @@ man -k "file size"
 # Paso 6
 man 5 passwd   # formato del archivo /etc/passwd
 man 1 passwd   # el comando passwd para cambiar contraseñas
+```
+
+</details>
+
+---
+
+### Lab 04 — Desafío de Operaciones de Archivos
+
+**Escenario:** Este lab es diferente a los anteriores — no es una guía paso a paso, sino un **desafío**: se te entrega una estructura de directorios con archivos y debes reorganizarlos usando solo `rm`, `cp` y `mv`. El objetivo final es que `challenge1/` contenga `challenge2.txt` y `challenge3.txt`, y que `challenge1.txt` haya sido eliminado.
+
+> En los labs anteriores aprendiste los comandos. Este lab simula cómo los usarás en la práctica real: frente a un sistema que no configuraste tú, con rutas que no conoces de memoria, resolviendo sobre la marcha.
+
+---
+
+#### El punto de partida
+
+```
+labex:project/ $ ls
+challenge1  challenge2  challenge3
+
+labex:project/ $ ls challenge1/
+challenge1.txt
+
+labex:project/ $ ls challenge2/
+challenge2.txt
+
+labex:project/ $ ls challenge3/
+challenge3.txt
+```
+
+Estructura inicial:
+```
+project/
+├── challenge1/
+│   └── challenge1.txt   ← hay que eliminar este
+├── challenge2/
+│   └── challenge2.txt   ← hay que copiar este a challenge1/
+└── challenge3/
+    └── challenge3.txt   ← hay que mover este a challenge1/
+```
+
+Estructura final esperada:
+```
+project/
+├── challenge1/
+│   ├── challenge2.txt   ✓
+│   └── challenge3.txt   ✓
+├── challenge2/
+│   └── challenge2.txt   (la copia, el original queda)
+└── challenge3/
+    (challenge3.txt ya no está aquí — fue movido)
+```
+
+---
+
+#### Paso 1 — Eliminar `challenge1.txt`
+
+```bash
+cd challenge1
+ls
+```
+```
+challenge1.txt
+```
+
+```bash
+rm challenge1.txt
+ls
+```
+```
+(vacío — el archivo ya no existe)
+```
+
+```bash
+cd ..
+```
+
+> `rm` elimina el archivo permanentemente. El `ls` posterior confirma que el directorio está vacío — buen hábito de verificación.
+
+---
+
+#### Paso 2 — Copiar `challenge2.txt` a `challenge1/`
+
+Aquí ocurrieron los errores más instructivos del lab:
+
+**Intento 1 — ruta absoluta incorrecta:**
+```bash
+cp /challenge2/challenge2.txt /home/challenge1/
+```
+```
+cp: cannot stat '/challenge2/challenge2.txt': No such file or directory
+```
+
+**¿Por qué falló?** La ruta `/challenge2/` empieza con `/`, lo que significa que busca `challenge2` en la **raíz del sistema** — no en el directorio actual. La carpeta `challenge2/` está en `/home/labex/project/challenge2/`, no en `/challenge2/`.
+
+**Intento 2 — destino inexistente:**
+```bash
+cp challenge2/challenge2.txt /home/challenge1/
+```
+```
+cp: cannot create regular file '/home/challenge1/': Not a directory
+```
+
+**¿Por qué falló?** Esta vez el origen sí estaba bien (ruta relativa correcta), pero el destino `/home/challenge1/` no existe como directorio. `cp` no puede crear directorios que no existen.
+
+**Intento 3 — ambas rutas relativas correctas:**
+```bash
+cp challenge2/challenge2.txt challenge1/
+```
+```
+(sin error = éxito)
+```
+
+**¿Por qué funcionó?** Origen: `challenge2/challenge2.txt` — relativo al directorio actual (`project/`) ✓. Destino: `challenge1/` — el directorio ya existe ✓. `cp` copia el archivo dentro del directorio destino conservando el nombre.
+
+---
+
+#### Paso 3 — Mover `challenge3.txt` a `challenge1/`
+
+```bash
+mv challenge3/challenge3.txt challenge1/
+```
+```
+(sin error = éxito)
+```
+
+```bash
+ls challenge1/
+```
+```
+challenge2.txt  challenge3.txt
+```
+
+`mv` tomó el archivo de `challenge3/` y lo dejó en `challenge1/`. A diferencia de `cp`, el original ya no existe en `challenge3/`.
+
+---
+
+#### El mapa mental de rutas — el error más común de este lab
+
+El error más importante del lab fue confundir rutas absolutas y relativas. Este mapa ayuda a entenderlo:
+
+```
+/ (raíz del sistema)
+└── home/
+    └── labex/
+        └── project/        ← aquí estás (pwd = /home/labex/project)
+            ├── challenge1/
+            ├── challenge2/
+            └── challenge3/
+```
+
+| Lo que escribiste | Dónde busca Linux |
+|------------------|------------------|
+| `/challenge2/` | En la raíz: `/challenge2/` — no existe |
+| `/home/challenge1/` | En `/home/challenge1/` — no existe |
+| `challenge2/` | En el dir actual: `/home/labex/project/challenge2/` ✓ |
+| `challenge1/` | En el dir actual: `/home/labex/project/challenge1/` ✓ |
+
+**Regla práctica:**
+- Si la ruta empieza con `/` → es **absoluta** — busca desde la raíz del sistema
+- Si la ruta NO empieza con `/` → es **relativa** — busca desde donde estás ahora
+
+Antes de ejecutar cualquier `cp` o `mv`, ejecuta `ls` con la ruta para confirmar que existe:
+```bash
+ls challenge2/challenge2.txt    # confirma que el origen existe
+ls challenge1/                   # confirma que el destino existe
+```
+
+---
+
+#### El typo del lab — `ks` en vez de `ls`
+
+```bash
+ks
+```
+```
+zsh: command not found: ks
+```
+
+Un error de dedo clásico. El shell es literal — `ks` no es ningún comando y lo dice claramente. No hay que entrar en pánico; simplemente repites el comando correcto. Linux nunca asume lo que quisiste decir.
+
+> Cuando veas `command not found`, lo primero que hay que hacer es releer lo que escribiste. El 90% de las veces es un typo. El otro 10% es que el programa no está instalado.
+
+---
+
+#### Errores frecuentes — Lab 04
+
+**Confundir ruta absoluta con relativa al copiar**
+
+El error `/challenge2/` en vez de `challenge2/` es el más común al empezar. Si el path empieza con `/`, Linux lo busca desde la raíz — que raramente es donde están tus archivos de trabajo. Cuando trabajes en `/home/usuario/proyecto/`, usa siempre rutas relativas para archivos dentro del proyecto.
+
+**`cp` con destino que no existe**
+
+`cp archivo.txt /ruta/que/no/existe/` falla. `cp` no crea directorios — solo copia dentro de directorios que ya existen. Si necesitas crear el destino primero: `mkdir -p destino/ && cp archivo.txt destino/`.
+
+**`mv` cuando querías `cp`**
+
+`mv` elimina el original. Si moviste un archivo y necesitas que el original permanezca donde estaba, tendrás que copiarlo de vuelta. Cuando no estés seguro, usa `cp` primero y borra el original manualmente después de verificar.
+
+**No verificar con `ls` antes de `rm`**
+
+Antes de cualquier `rm`, especialmente con comodines, siempre hacer `ls` primero para ver exactamente qué se va a borrar. `rm challenge1.txt` es seguro porque es un archivo concreto; `rm challenge*` podría borrar más de lo esperado.
+
+---
+
+#### Ejercicio — Lab 04
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Preparación:**
+```bash
+mkdir -p ~/reto/{entrada,procesado,archivo}
+touch ~/reto/entrada/datos_{1..3}.csv
+touch ~/reto/entrada/temporal.tmp
+```
+
+**Estructura inicial:**
+```
+reto/
+├── entrada/
+│   ├── datos_1.csv
+│   ├── datos_2.csv
+│   ├── datos_3.csv
+│   └── temporal.tmp
+├── procesado/    (vacío)
+└── archivo/      (vacío)
+```
+
+**Tareas:**
+
+1. Elimina `temporal.tmp` — no se necesita.
+2. Copia `datos_1.csv` a `procesado/` conservando el original en `entrada/`.
+3. Mueve `datos_2.csv` y `datos_3.csv` a `archivo/`.
+4. Verifica el resultado con `ls -R ~/reto/`.
+
+**Estado final esperado:**
+```
+reto/
+├── entrada/
+│   └── datos_1.csv        (original)
+├── procesado/
+│   └── datos_1.csv        (copia)
+└── archivo/
+    ├── datos_2.csv
+    └── datos_3.csv
+```
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+cd ~/reto/entrada
+
+# Paso 1
+rm temporal.tmp
+
+# Paso 2 (desde ~/reto/)
+cd ..
+cp entrada/datos_1.csv procesado/
+
+# Paso 3
+mv entrada/datos_2.csv archivo/
+mv entrada/datos_3.csv archivo/
+
+# Paso 4
+ls -R ~/reto/
 ```
 
 </details>
