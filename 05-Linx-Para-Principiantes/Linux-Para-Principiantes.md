@@ -13,6 +13,7 @@
 - [Labs](#labs)
   - [Lab 01 — Tu Primera Terminal](#lab-01--tu-primera-terminal)
   - [Lab 02 — Navegar y Gestionar Archivos](#lab-02--navegar-y-gestionar-archivos)
+  - [Lab 03 — Cómo Pedir Ayuda en Linux](#lab-03--cómo-pedir-ayuda-en-linux)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -829,6 +830,331 @@ man rm
 
 ---
 
+### Lab 03 — Cómo Pedir Ayuda en Linux
+
+**Escenario:** Encuentras un comando que nunca has visto, o recuerdas que existe algo para hacer cierta tarea pero no recuerdas cómo se llama. En Linux no tienes que buscar en internet cada vez — el propio sistema trae toda la documentación integrada. Este lab te enseña a leer esa documentación eficientemente.
+
+> Saber usar el sistema de ayuda de Linux es más valioso que memorizar comandos. Los comandos son cientos; la habilidad de encontrar lo que necesitas cuando lo necesitas dura para siempre.
+
+---
+
+#### `type` — Saber qué tipo de comando es
+
+**Sintaxis:**
+```
+type comando
+type -a comando    # muestra todas las ubicaciones donde existe
+```
+
+**Qué hace:** Revela la naturaleza de un comando. En Linux, no todos los "comandos" son iguales — algunos están integrados en el shell (built-ins), otros son programas externos en el disco.
+
+**Ejemplo:**
+```bash
+type cd
+```
+```
+cd is a shell builtin
+```
+
+```bash
+type ls
+```
+```
+ls is /usr/bin/ls
+```
+
+```bash
+type echo
+```
+```
+echo is a shell builtin
+```
+
+```bash
+type python3
+```
+```
+python3 is /usr/bin/python3
+```
+
+**Los tres tipos de comandos en Linux:**
+
+| Tipo | Qué es | Ejemplo | Cómo lo reconoce `type` |
+|------|--------|---------|------------------------|
+| Built-in | Integrado en el shell — no existe como archivo | `cd`, `echo`, `pwd` | `is a shell builtin` |
+| Externo | Programa en el disco, ejecutable | `ls`, `grep`, `python3` | `is /ruta/al/programa` |
+| Alias | Nombre alternativo definido por el usuario o el sistema | `ll` (alias de `ls -l`) | `is aliased to 'ls -l'` |
+
+**¿Por qué importa saber si es built-in o externo?**
+
+- Los built-ins **no tienen una página `man` propia** — su documentación está en la sección de `man bash`
+- Los externos **sí tienen `man`** porque son programas independientes
+- Un built-in es **más rápido** que un externo — no hay que leer un archivo del disco
+
+```bash
+# Esto no da resultado (cd es built-in):
+man cd         # puede redirigir a "man builtins" o no encontrar nada
+
+# Esto sí funciona (ls es externo):
+man ls         # página completa
+```
+
+> `type` es el comando que debes ejecutar primero cuando te preguntas "¿por qué este comando se comporta raro?" o "¿por qué `man` no encuentra nada?". La respuesta casi siempre está en si es built-in o externo.
+
+---
+
+#### `--help` — Ayuda rápida integrada en el comando
+
+**Sintaxis:**
+```
+comando --help
+comando -h        # en algunos comandos, versión corta de --help
+```
+
+**Qué hace:** Le pide al propio comando que imprima un resumen de sus opciones. Es más rápido que abrir `man` cuando solo necesitas recordar el nombre de una flag específica.
+
+**Cuándo usar `--help` vs `man`:**
+
+| Situación | Usa |
+|-----------|-----|
+| Necesitas recordar una flag rápidamente | `--help` |
+| Quieres entender el comando a fondo | `man` |
+| El comando es nuevo para ti | `man` |
+| Estás en medio de una tarea y no quieres perder el contexto | `--help` |
+
+**Ejemplo:**
+```bash
+ls --help | grep "\-h"
+```
+Esto filtra la ayuda de `ls` para encontrar la línea que describe `-h`, sin leer toda la página.
+
+> La combinación `comando --help | grep "lo que busco"` es muy útil cuando la ayuda es larga y sabes aproximadamente qué flag buscas.
+
+---
+
+#### `man` — El manual completo
+
+**Sintaxis:**
+```
+man comando              # abre el manual del comando
+man N comando            # abre la sección N del manual
+man -k palabra           # busca páginas relacionadas con esa palabra
+```
+
+**Qué hace:** Abre la página del manual del comando indicado. El manual de Linux (`man pages`) es una de las documentaciones técnicas más completas que existen. Fue diseñado para ser la referencia definitiva de cada comando, llamada de sistema y archivo de configuración.
+
+**Estructura de una página `man`:**
+
+Cada página `man` tiene secciones predecibles:
+
+| Sección | Contenido |
+|---------|----------|
+| `NAME` | Nombre del comando y descripción en una línea |
+| `SYNOPSIS` | Sintaxis completa con todos sus argumentos |
+| `DESCRIPTION` | Explicación detallada de qué hace |
+| `OPTIONS` | Lista de todas las flags con su descripción |
+| `EXAMPLES` | Casos de uso (no siempre presente) |
+| `SEE ALSO` | Comandos relacionados que podrían interesarte |
+| `BUGS` | Comportamientos conocidos o limitaciones |
+
+**Cómo navegar dentro de `man`:**
+
+| Tecla | Acción |
+|-------|--------|
+| `Espacio` o `f` | Avanzar una página completa |
+| `b` | Retroceder una página completa |
+| `j` / `k` | Bajar / subir una línea |
+| `/término` | Buscar un término hacia adelante |
+| `?término` | Buscar un término hacia atrás |
+| `n` | Ir a la siguiente coincidencia de búsqueda |
+| `N` | Ir a la coincidencia anterior |
+| `g` | Ir al inicio del manual |
+| `G` | Ir al final del manual |
+| `q` | Salir |
+
+**Las 9 secciones del manual de Linux:**
+
+`man` organiza la documentación en secciones numeradas. La sección determina de qué habla la página:
+
+| Sección | Contiene |
+|---------|---------|
+| 1 | Comandos de usuario (los que usas en terminal) |
+| 2 | Llamadas al sistema (del kernel) |
+| 3 | Funciones de biblioteca (C, Python, etc.) |
+| 4 | Archivos especiales (`/dev/null`, etc.) |
+| 5 | Formatos de archivos (`/etc/passwd`, `crontab`, etc.) |
+| 6 | Juegos |
+| 7 | Miscelánea (convenciones, protocolos) |
+| 8 | Comandos de administración del sistema (`root`) |
+
+```bash
+man ls          # sección 1 por defecto: comandos de usuario
+man 5 crontab   # sección 5: formato del archivo crontab
+man 8 useradd   # sección 8: comando de administración
+```
+
+> Cuando buscas documentación de un archivo de configuración como `/etc/passwd`, la documentación está en la sección 5: `man 5 passwd`. Sin el `5`, obtendrías la documentación del comando `passwd` (sección 1).
+
+---
+
+#### `apropos` — Buscar comandos por lo que hacen
+
+**Sintaxis:**
+```
+apropos palabra_clave
+apropos "frase con espacios"
+```
+
+**Qué hace:** Busca en los títulos y descripciones de todas las páginas `man` instaladas. Si no recuerdas el nombre de un comando pero sabes para qué sirve, `apropos` te da las opciones.
+
+**Ejemplo:**
+```bash
+apropos compress
+```
+```
+bzip2 (1)           - a block-sorting file compressor
+gzip (1)            - compress or expand files
+tar (1)             - an archiving utility
+zip (1)             - package and compress (archive) files
+zcat (1)            - compress or expand files
+```
+
+```bash
+apropos "disk usage"
+```
+```
+df (1)              - report file system disk space usage
+du (1)              - estimate file space usage
+```
+
+```bash
+apropos network
+```
+```
+ifconfig (8)        - configure a network interface
+ip (8)              - show / manipulate routing, network devices...
+ping (8)            - send ICMP ECHO_REQUEST to network hosts
+ss (8)              - another utility to investigate sockets
+```
+
+**`apropos` vs `man -k`:**
+
+Son equivalentes — `apropos palabra` hace exactamente lo mismo que `man -k palabra`:
+
+```bash
+apropos compress     # equivalente a:
+man -k compress      # misma búsqueda
+```
+
+> `apropos` es especialmente útil cuando estás estudiando un tema nuevo. `apropos backup` te muestra todos los comandos relacionados con respaldos. `apropos user` te muestra todo lo relacionado con gestión de usuarios.
+
+**Si `apropos` no devuelve resultados:**
+
+```bash
+sudo mandb    # reconstruye la base de datos de man pages
+```
+
+En sistemas recién instalados o cuando se instala software nuevo, la base de datos de `apropos` puede estar desactualizada. `mandb` la reconstruye.
+
+---
+
+#### Flujo de diagnóstico — "¿Cómo uso este comando?"
+
+Cuando encuentras un comando desconocido o no recuerdas cómo se usa, sigue este orden:
+
+```
+1. type comando
+   → ¿Es built-in, externo o alias?
+           ↓
+2. comando --help
+   → Resumen rápido de opciones
+   → ¿Es suficiente para lo que necesitas?
+       ├── SÍ → ejecuta el comando
+       └── NO → continúa
+           ↓
+3. man comando
+   → Documentación completa
+   → Busca con /término lo que necesitas
+           ↓
+4. Si no recuerdas el nombre del comando:
+   apropos "lo que quieres hacer"
+   → Lista de candidatos con su descripción
+```
+
+---
+
+#### Errores frecuentes — Lab 03
+
+**`man cd` no encuentra nada o abre "builtins"**
+
+`cd` es un built-in del shell, no un programa externo. No tiene su propia página `man`. La documentación de los built-ins de Bash está en `man bash` — es larga pero completa. Para ir directo: `man bash` y luego búsqueda con `/^SHELL BUILTIN COMMANDS`.
+
+**`apropos` devuelve "nothing appropriate"**
+
+La base de datos de `man` está desactualizada. Solución: `sudo mandb` para reconstruirla. Esto ocurre frecuentemente en sistemas recién instalados o después de instalar paquetes nuevos.
+
+**`man 5 crontab` vs `man crontab` — confusión de secciones**
+
+`man crontab` (sin número) abre la sección 1 — el comando `crontab`. `man 5 crontab` abre la sección 5 — el **formato del archivo** crontab. Son documentaciones completamente distintas. Si la página no contiene lo que buscas, prueba con otra sección.
+
+**Buscar dentro de `man` con mayúsculas**
+
+La búsqueda con `/término` dentro de `man` distingue mayúsculas y minúsculas por defecto. `/Copy` no encuentra `copy`. Para buscar sin distinción, agrega `-i` al invocar man: `man -P 'less -i' comando` — o simplemente busca en minúsculas.
+
+---
+
+#### Ejercicio — Lab 03
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Tareas:**
+
+1. Usa `type` para investigar estos comandos y anota si cada uno es built-in, externo o alias:
+   `echo`, `ls`, `grep`, `pwd`, `cat`, `alias`
+2. Usa `ls --help | grep "\-t"` para encontrar qué hace la flag `-t` de `ls` sin abrir el manual completo.
+3. Abre `man grep` y navega a la sección `EXAMPLES` usando `/EXAMPLES`. ¿Qué hace el ejemplo con `-i`?
+4. Usa `apropos` para encontrar comandos relacionados con "process". ¿Cuántos aparecen?
+5. Usa `man -k "file size"` y encuentra qué comando reporta el uso de espacio en disco.
+6. Usa `man 5 passwd` y `man 1 passwd` — ¿qué documentan respectivamente?
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+type echo      # shell builtin
+type ls        # /usr/bin/ls (externo)
+type grep      # /usr/bin/grep (externo)
+type pwd       # shell builtin
+type cat       # /usr/bin/cat (externo)
+type alias     # shell builtin
+
+# Paso 2
+ls --help | grep "\-t"
+# -t: sort by time, newest first
+
+# Paso 3
+man grep
+# dentro de man: escribes /EXAMPLES y presionas Enter
+# navega hasta el ejemplo con -i (case insensitive)
+# presiona q para salir
+
+# Paso 4
+apropos process
+
+# Paso 5
+man -k "file size"
+# verás du (1) - estimate file space usage
+
+# Paso 6
+man 5 passwd   # formato del archivo /etc/passwd
+man 1 passwd   # el comando passwd para cambiar contraseñas
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -864,6 +1190,14 @@ man rm
 | `rm -r directorio/` | Elimina un directorio y todo su contenido | 02 |
 | `comando --help` | Muestra la ayuda rápida del comando | 02 |
 | `man comando` | Abre el manual completo del comando | 02 |
+| `type comando` | Revela si el comando es built-in, externo o alias | 03 |
+| `type -a comando` | Muestra todas las ubicaciones del comando | 03 |
+| `comando --help \| grep "flag"` | Filtra la ayuda para encontrar una opción específica | 03 |
+| `man N comando` | Abre una sección específica del manual | 03 |
+| `man 5 passwd` | Manual del formato del archivo /etc/passwd (sección 5) | 03 |
+| `man -k palabra` | Busca páginas de manual por palabra clave | 03 |
+| `apropos palabra` | Busca comandos por lo que hacen (igual que man -k) | 03 |
+| `sudo mandb` | Reconstruye la base de datos del sistema de man | 03 |
 
 ---
 
@@ -961,3 +1295,14 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **`/dev/null`** | Dispositivo especial que descarta todo lo que se escribe en él — siempre vacío |
 | **`Ctrl+C`** | Atajo para interrumpir (cancelar) el proceso que se está ejecutando |
 | **`tail -f`** | Sigue un archivo en tiempo real mostrando nuevas líneas conforme aparecen |
+| **`type`** | Revela la naturaleza de un comando: built-in, externo o alias |
+| **Built-in** | Comando integrado en el shell — no existe como archivo en el disco |
+| **Comando externo** | Programa independiente en el disco — generalmente en `/usr/bin/` o `/bin/` |
+| **Alias** | Nombre alternativo para un comando, usualmente definido en `~/.bashrc` |
+| **`man`** | Manual de Linux — documentación técnica completa de comandos, archivos y llamadas al sistema |
+| **`man pages`** | Las páginas del manual de Linux — escritas en formato específico para el comando `man` |
+| **Sección de `man`** | Número del 1 al 9 que clasifica el tipo de documentación (1=comandos, 5=archivos, 8=admin) |
+| **`apropos`** | Busca en los títulos y descripciones de todas las páginas man instaladas |
+| **`mandb`** | Base de datos de páginas man — se reconstruye con `sudo mandb` |
+| **SYNOPSIS en man** | Sección que muestra la sintaxis completa del comando con todos sus argumentos posibles |
+| **SEE ALSO en man** | Sección que lista comandos relacionados — útil para descubrir herramientas similares |
