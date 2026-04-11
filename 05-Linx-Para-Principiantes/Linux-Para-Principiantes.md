@@ -18,6 +18,7 @@
   - [Lab 05 — Usuarios, Grupos y Permisos](#lab-05--usuarios-grupos-y-permisos)
   - [Lab 06 — Crear Usuarios con Configuración Precisa](#lab-06--crear-usuarios-con-configuración-precisa)
   - [Lab 07 — El Sistema de Archivos y Búsqueda](#lab-07--el-sistema-de-archivos-y-búsqueda)
+  - [Lab 08 — Variables de Entorno](#lab-08--variables-de-entorno)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -2628,6 +2629,436 @@ find ~/lab7 -mtime -1
 
 ---
 
+### Lab 08 — Variables de Entorno
+
+**Escenario:** Quieres entender cómo Linux "recuerda" configuraciones entre comandos y sesiones. Creas tu propia variable, descubres que un script hijo no puede verla, usas `export` para solucionarlo, extiendes el `PATH` para ejecutar tus scripts desde cualquier lugar, y finalmente guardas todo en `.zshrc` para que persista para siempre.
+
+> Una variable de entorno es información que el sistema pasa automáticamente a cada programa que lanzas. Cuando tu terminal sabe que eres el usuario `labex`, que tu home está en `/home/labex` y que el idioma es inglés — todo eso son variables de entorno trabajando.
+
+---
+
+#### Variables de shell — el nivel más básico
+
+**Sintaxis:**
+```bash
+NOMBRE="valor"         # definir (sin espacios alrededor del =)
+echo $NOMBRE           # leer el valor
+echo "${NOMBRE}"       # forma recomendada — más segura
+```
+
+**Qué hace:** Crea un nombre que almacena un valor dentro de la sesión de shell actual. La variable existe mientras esa terminal esté abierta y solo es accesible desde ese mismo proceso de shell.
+
+**Ejemplo del lab:**
+```bash
+my_var="Hello, Linux"
+echo $my_var
+```
+```
+Hello, Linux
+```
+
+```bash
+echo "The value of my_var is: $my_var"
+```
+```
+The value of my_var is: Hello, Linux
+```
+
+> El signo `$` es lo que le dice al shell "no tomes esto como texto literal, busca el valor de esa variable". Sin `$`, `echo my_var` imprime literalmente `my_var`.
+
+---
+
+#### `env` — Ver todas las variables de entorno activas
+
+**Sintaxis:**
+```bash
+env                    # lista todas las variables de entorno
+env | grep PATRON      # filtrar por nombre
+```
+
+**Qué hace:** Imprime todas las variables de entorno que el shell actual tiene definidas. Son las variables que se heredan automáticamente por cualquier proceso hijo.
+
+**Variables importantes que reveló `env` en el lab:**
+
+| Variable | Valor del lab | Qué significa |
+|----------|-------------|--------------|
+| `HOME` | `/home/labex` | Directorio home del usuario |
+| `USER` | `labex` | Nombre del usuario actual |
+| `SHELL` | `/usr/bin/zsh` | El shell que se está usando |
+| `PWD` | `/home/labex/project` | Directorio de trabajo actual |
+| `PATH` | `/usr/bin:/bin:...` | Directorios donde buscar ejecutables |
+| `LANG` | `en_US.UTF-8` | Idioma y codificación del sistema |
+| `TERM` | `xterm-256color` | Tipo de terminal (afecta colores y atajos) |
+| `JAVA_HOME` | `/usr/lib/jvm/java-11-...` | Dónde está instalado Java |
+| `GOROOT` | `/usr/local/go` | Dónde está instalado Go |
+
+> La salida de `env` en LabEx revela todo el stack tecnológico del entorno: Java, Go, Node.js, Maven, Yarn — cada uno configurado con sus propias variables de entorno.
+
+---
+
+#### La diferencia clave: variable de shell vs variable de entorno
+
+El lab demostró este concepto de forma directa con un script:
+
+```bash
+# 1. Variable de shell (sin export)
+my_var="Hello, Linux"
+
+# 2. Variable de entorno (con export)
+export MY_ENV_VAR="This is an environment variable"
+
+# 3. Script que intenta acceder a ambas
+cat << 'EOF' > test_vars.sh
+echo "Shell variable: $my_var"
+echo "Environment variable: $MY_ENV_VAR"
+EOF
+
+chmod +x test_vars.sh
+./test_vars.sh
+```
+```
+Shell variable:
+Environment variable: This is an environment variable
+```
+
+**¿Qué pasó?** Al ejecutar `./test_vars.sh`, el shell lanza un **proceso hijo** (una nueva instancia de shell) para correr el script. Ese proceso hijo hereda las variables de entorno (`export`) pero no tiene acceso a las variables de shell del proceso padre.
+
+**Los tres niveles de permanencia:**
+
+| Tipo | Cómo se crea | Acceso proceso hijo | Persiste al cerrar |
+|------|-------------|--------------------|--------------------|
+| Variable de shell | `mi_var="valor"` | No | No |
+| Variable de entorno | `export MI_VAR="valor"` | Sí | No |
+| Variable permanente | En `~/.zshrc` o `~/.bashrc` | Sí | Sí — sobrevive al reinicio |
+
+---
+
+#### `export` — Convertir una variable en variable de entorno
+
+**Sintaxis:**
+```bash
+export NOMBRE="valor"         # definir y exportar en un paso
+export NOMBRE                 # exportar una variable ya definida
+```
+
+**Qué hace:** Marca la variable para que sea heredada por todos los procesos hijos que se lancen desde este shell. Sin `export`, la variable es privada del shell actual.
+
+**Ejemplo del lab:**
+```bash
+export MY_ENV_VAR="This is an environment variable"
+env | grep MY_ENV_VAR
+```
+```
+MY_ENV_VAR=This is an environment variable
+```
+
+---
+
+#### `echo $PATH` — Entender el PATH
+
+`PATH` es la variable de entorno más importante del sistema. Contiene una lista de directorios separados por `:` donde el shell busca los ejecutables cuando escribes un comando.
+
+```bash
+echo $PATH
+```
+```
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:...:/home/labex/my_scripts
+```
+
+**Cómo funciona en la práctica:**
+
+Cuando escribes `ls`, el shell no sabe dónde está `ls`. Lo busca en cada directorio del `PATH` de izquierda a derecha hasta encontrarlo. En este caso, lo encuentra en `/usr/bin/ls`.
+
+Si escribes un comando que no está en ningún directorio del PATH:
+```
+command not found: mi_script
+```
+
+La solución es agregar el directorio al PATH.
+
+---
+
+#### Extender el PATH con un directorio propio
+
+**El problema que resuelve:** Tienes scripts en `~/my_scripts/` y quieres ejecutarlos desde cualquier directorio sin escribir la ruta completa.
+
+```bash
+mkdir ~/my_scripts
+export PATH="$PATH:$HOME/my_scripts"
+```
+
+**Desglosado:**
+- `$PATH` — el valor actual del PATH (todos los directorios existentes)
+- `:` — el separador de directorios en PATH
+- `$HOME/my_scripts` — agrega tu carpeta al final
+
+**El resultado:**
+```bash
+cat << 'EOF' > ~/my_scripts/hello.sh
+echo "Hello from my custom script!"
+EOF
+chmod +x ~/my_scripts/hello.sh
+
+# Ahora funciona desde cualquier directorio:
+hello.sh
+```
+```
+Hello from my custom script!
+```
+
+```bash
+cd /tmp
+hello.sh
+```
+```
+Hello from my custom script!
+```
+
+> Agregar al final del PATH (`$PATH:nuevo`) significa que tus scripts tienen menor prioridad que los del sistema. Agregar al inicio (`nuevo:$PATH`) les da mayor prioridad — pero puede causar problemas si tu script tiene el mismo nombre que un comando del sistema.
+
+---
+
+#### `<< 'EOF'` vs `<< EOF` — detalle importante del lab
+
+El lab usó comillas simples alrededor de `EOF`:
+
+```bash
+cat << 'EOF' > test_vars.sh
+echo "Shell variable: $my_var"
+echo "Environment variable: $MY_ENV_VAR"
+EOF
+```
+
+**¿Por qué las comillas simples?**
+
+| Sintaxis | Comportamiento dentro del heredoc |
+|----------|----------------------------------|
+| `<< EOF` | El shell expande `$variables` antes de escribir |
+| `<< 'EOF'` | El contenido se trata como texto literal — `$variables` no se expande |
+
+```bash
+# Con << EOF: $my_var se expande al escribir el archivo
+cat << EOF > script.sh
+echo "$my_var"        # el archivo quedaría: echo "Hello, Linux"
+EOF
+
+# Con << 'EOF': $my_var queda como texto literal
+cat << 'EOF' > script.sh
+echo "$my_var"        # el archivo quedaría: echo "$my_var"
+EOF
+```
+
+Para crear scripts, siempre usa `<< 'EOF'` — quieres que las variables se expandan cuando el script corra, no cuando se crea el archivo.
+
+---
+
+#### Hacer variables permanentes con `.zshrc` / `.bashrc`
+
+Las variables creadas con `export` desaparecen al cerrar la terminal. Para que persistan, hay que agregarlas al archivo de configuración del shell.
+
+```bash
+nano ~/.zshrc
+```
+
+Al final del archivo, agrega:
+```bash
+export MY_ENV_VAR="This is an environment variable"
+export PATH="$PATH:$HOME/my_scripts"
+```
+
+**Aplicar los cambios sin cerrar la terminal:**
+```bash
+source ~/.zshrc
+```
+
+`source` ejecuta el archivo en el **contexto del shell actual** — a diferencia de `./archivo.sh` que lanza un proceso hijo, `source` aplica los cambios directamente a la sesión actual.
+
+**¿Qué archivo usar?**
+
+| Archivo | Shell | Cuándo se ejecuta |
+|---------|-------|------------------|
+| `~/.bashrc` | Bash | Al abrir una terminal interactiva |
+| `~/.zshrc` | Zsh | Al abrir una terminal interactiva |
+| `~/.bash_profile` | Bash | Al iniciar sesión (login shell) |
+| `~/.profile` | Cualquiera | Al iniciar sesión (genérico) |
+
+> En el lab el shell era `zsh` (el `SHELL=/usr/bin/zsh` que viste en `env`). Por eso se usó `~/.zshrc`. En Ubuntu sin personalizar, el shell por defecto es `bash` y el archivo sería `~/.bashrc`.
+
+---
+
+#### Variables de entorno integradas del sistema
+
+Linux define automáticamente estas variables para todos los usuarios:
+
+```bash
+echo $HOME    # /home/labex
+echo $USER    # labex
+echo $SHELL   # /usr/bin/zsh
+echo $PWD     # /tmp (directorio actual)
+echo $TERM    # xterm-256color
+```
+
+**Variables integradas más útiles:**
+
+| Variable | Qué contiene | Uso típico |
+|----------|-------------|-----------|
+| `$HOME` | Home del usuario | `cd $HOME`, rutas en scripts |
+| `$USER` | Nombre del usuario | Logs, mensajes personalizados |
+| `$SHELL` | Shell activo | Detectar qué shell usar en scripts |
+| `$PWD` | Directorio actual | Equivalente a `$(pwd)` en scripts |
+| `$PATH` | Directorios de ejecutables | Extender con nuevos directorios |
+| `$TERM` | Tipo de terminal | Afecta colores y capacidades |
+| `$LANG` | Idioma y codificación | Afecta ordenamiento y fechas |
+| `$EDITOR` | Editor de texto preferido | Git, crontab usan este para abrir archivos |
+| `$OLDPWD` | Directorio anterior | Lo que usa `cd -` internamente |
+
+---
+
+#### `unset` — Eliminar una variable
+
+**Sintaxis:**
+```bash
+unset NOMBRE_VARIABLE
+unset -v NOMBRE_VARIABLE    # explícitamente una variable (no función)
+unset -f nombre_funcion      # eliminar una función
+```
+
+**Qué hace:** Elimina completamente la variable del entorno. Después de `unset`, la variable deja de existir — accederla devuelve cadena vacía.
+
+**Ejemplo del lab:**
+```bash
+echo $MY_ENV_VAR
+```
+```
+This is an environment variable
+```
+
+```bash
+unset MY_ENV_VAR
+echo $MY_ENV_VAR
+```
+```
+(línea vacía — la variable ya no existe)
+```
+
+> `unset` solo afecta la sesión actual. Si la variable está definida en `~/.zshrc`, reaparecerá la próxima vez que abras una terminal. Para eliminarla permanentemente, también hay que borrarla del archivo de configuración.
+
+---
+
+#### Flujo completo del lab
+
+```
+1. my_var="valor"                → Variable de shell (privada, solo esta sesión)
+        ↓
+2. export MY_VAR="valor"         → Variable de entorno (heredada por procesos hijos)
+        ↓
+3. env | grep MY_VAR             → Verificar que existe en el entorno
+        ↓
+4. export PATH="$PATH:$HOME/dir" → Extender el PATH con tu directorio
+        ↓
+5. nano ~/.zshrc                 → Agregar las variables para hacerlas permanentes
+        ↓
+6. source ~/.zshrc               → Aplicar cambios sin reiniciar la terminal
+        ↓
+7. unset MY_VAR                  → Eliminar una variable de la sesión actual
+```
+
+---
+
+#### Errores frecuentes — Lab 08
+
+**`MI_VAR = "valor"` con espacios alrededor del `=`**
+
+Bash interpreta `MI_VAR = "valor"` como "ejecuta el comando `MI_VAR` con el argumento `=` y el argumento `valor`" — que no existe. El `=` en la asignación de variables no puede tener espacios. Siempre: `MI_VAR="valor"`.
+
+**`export PATH="nuevo_dir"` sin incluir `$PATH`**
+
+Si escribes `export PATH="/mi/dir"` sin `$PATH:` al inicio, reemplazas el PATH completo por ese único directorio. Los comandos como `ls`, `grep`, `cat` dejan de funcionar porque sus directorios ya no están en el PATH. La forma correcta es siempre `export PATH="$PATH:/mi/dir"`.
+
+**Modificar `.bashrc` cuando el shell es `zsh` (o viceversa)**
+
+Los cambios en `~/.bashrc` no tienen efecto si el shell activo es `zsh`. Verifica primero con `echo $SHELL` para saber qué archivo editar.
+
+**`source` vs `./archivo.sh` para aplicar configuración**
+
+`./archivo.sh` lanza un proceso hijo — los cambios de variables ocurren en ese hijo y desaparecen cuando termina. `source archivo.sh` ejecuta el archivo en el shell actual — los cambios quedan. Para aplicar `.zshrc` o `.bashrc`, siempre usa `source`.
+
+**`unset` sin efecto al reabrir la terminal**
+
+`unset MY_VAR` elimina la variable de la sesión actual, pero si está en `~/.zshrc`, la próxima terminal la cargará de nuevo. Para que sea permanente, también hay que borrarla del archivo con `nano ~/.zshrc`.
+
+---
+
+#### Ejercicio — Lab 08
+
+**Entorno:** KillerCoda (Ubuntu/Zsh) o cualquier Linux.
+
+**Tareas:**
+
+1. Crea una variable de shell `proyecto="mi_app"` y verifícala con `echo`.
+2. Exporta `export VERSION="1.0.0"`.
+3. Crea el script `test_scope.sh` usando here-document con `<< 'EOF'` que imprima ambas variables. Ejecuta el script y observa cuál aparece vacía.
+4. Usa `env | grep VERSION` para confirmar que `VERSION` está en el entorno.
+5. Crea el directorio `~/mis_scripts` y agrega un script `saludo.sh` que imprima tu nombre.
+6. Extiende el PATH: `export PATH="$PATH:$HOME/mis_scripts"`.
+7. Ejecuta `saludo.sh` desde `/tmp` para confirmar que el PATH funciona.
+8. Agrega `export VERSION="1.0.0"` y la línea del PATH a tu `~/.bashrc` o `~/.zshrc`.
+9. Aplica los cambios con `source`.
+10. Usa `unset VERSION` y verifica que la variable desapareció.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+proyecto="mi_app"
+echo $proyecto
+
+# Paso 2
+export VERSION="1.0.0"
+
+# Paso 3
+cat << 'EOF' > test_scope.sh
+echo "Variable de shell: $proyecto"
+echo "Variable de entorno: $VERSION"
+EOF
+chmod +x test_scope.sh
+./test_scope.sh
+# "proyecto" aparece vacía — no fue exportada
+
+# Paso 4
+env | grep VERSION
+
+# Paso 5
+mkdir ~/mis_scripts
+cat << 'EOF' > ~/mis_scripts/saludo.sh
+echo "Hola, soy Tu_Nombre!"
+EOF
+chmod +x ~/mis_scripts/saludo.sh
+
+# Paso 6
+export PATH="$PATH:$HOME/mis_scripts"
+
+# Paso 7
+cd /tmp
+saludo.sh
+
+# Paso 8 (editar el archivo correspondiente)
+echo 'export VERSION="1.0.0"' >> ~/.bashrc
+echo 'export PATH="$PATH:$HOME/mis_scripts"' >> ~/.bashrc
+
+# Paso 9
+source ~/.bashrc
+
+# Paso 10
+unset VERSION
+echo $VERSION   # vacío
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -2701,6 +3132,18 @@ find ~/lab7 -mtime -1
 | `find ruta -mtime -1` | Busca archivos modificados en las últimas 24 horas | 07 |
 | `sudo find / -name "f" 2>/dev/null` | Busca en todo el sistema suprimiendo errores de permisos | 07 |
 | `which comando` | Muestra la ruta completa del ejecutable que se usaría | 07 |
+| `VAR="valor"` | Crea una variable de shell (solo sesión, no heredada) | 08 |
+| `echo $VAR` | Muestra el valor de una variable | 08 |
+| `env` | Lista todas las variables de entorno activas | 08 |
+| `env \| grep PATRON` | Filtra variables de entorno por nombre | 08 |
+| `export VAR="valor"` | Crea variable de entorno heredada por procesos hijos | 08 |
+| `export PATH="$PATH:/nueva/ruta"` | Agrega un directorio al PATH sin sobreescribirlo | 08 |
+| `echo $PATH` | Muestra los directorios donde el shell busca ejecutables | 08 |
+| `source ~/.zshrc` | Aplica cambios del archivo de config sin reiniciar la terminal | 08 |
+| `unset VAR` | Elimina una variable del entorno de la sesión actual | 08 |
+| `echo $HOME` | Muestra el directorio home del usuario actual | 08 |
+| `echo $USER` | Muestra el nombre del usuario actual | 08 |
+| `echo $SHELL` | Muestra el shell que se está usando | 08 |
 
 ---
 
@@ -2851,3 +3294,19 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **`which`** | Localiza el ejecutable que se invocaría al escribir un comando |
 | **`nano`** | Editor de texto de terminal — muestra los atajos en la barra inferior |
 | **`2>/dev/null`** | Redirige stderr (mensajes de error) a la papelera — limpia la salida |
+| **Variable de shell** | Variable local al proceso de shell actual — no se hereda por procesos hijos |
+| **Variable de entorno** | Variable marcada con `export` — se hereda automáticamente por todos los procesos hijos |
+| **`export`** | Marca una variable para que sea heredada por procesos hijos |
+| **`PATH`** | Variable de entorno con los directorios donde el shell busca ejecutables |
+| **Proceso hijo** | Proceso lanzado por otro proceso (el padre) — hereda las variables de entorno del padre |
+| **`source`** | Ejecuta un archivo en el contexto del shell actual — aplica cambios de configuración sin reiniciar |
+| **`~/.bashrc`** | Archivo de configuración de Bash — se ejecuta al abrir cada terminal interactiva |
+| **`~/.zshrc`** | Archivo de configuración de Zsh — equivalente al `.bashrc` para el shell Zsh |
+| **`unset`** | Elimina una variable del entorno de la sesión actual |
+| **`env`** | Muestra todas las variables de entorno del proceso actual |
+| **`$HOME`** | Variable integrada con el directorio home del usuario |
+| **`$USER`** | Variable integrada con el nombre del usuario actual |
+| **`$SHELL`** | Variable integrada con la ruta del shell activo |
+| **`$OLDPWD`** | Directorio anterior — es lo que usa `cd -` internamente |
+| **`<< 'EOF'`** | Here-document con expansión desactivada — las variables no se expanden al escribir el archivo |
+| **`<< EOF`** | Here-document normal — las variables se expanden mientras se escribe el archivo |
