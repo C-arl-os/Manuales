@@ -19,6 +19,8 @@
   - [Lab 06 — Crear Usuarios con Configuración Precisa](#lab-06--crear-usuarios-con-configuración-precisa)
   - [Lab 07 — El Sistema de Archivos y Búsqueda](#lab-07--el-sistema-de-archivos-y-búsqueda)
   - [Lab 08 — Variables de Entorno](#lab-08--variables-de-entorno)
+  - [Lab 09 — Desafío: Variable de Entorno Permanente](#lab-09--desafío-variable-de-entorno-permanente)
+  - [Lab 10 — Empaquetar y Comprimir Archivos](#lab-10--empaquetar-y-comprimir-archivos)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -3059,6 +3061,602 @@ echo $VERSION   # vacío
 
 ---
 
+### Lab 09 — Desafío: Variable de Entorno Permanente
+
+**Escenario:** Como administrador de sistemas junior, necesitas establecer un entorno de desarrollo consistente. La tarea: crear la variable `PROJECT_DIR` que apunte a `/home/labex/project`, hacerla permanente en `~/.zshrc`, y verificar que funciona correctamente en cualquier sesión.
+
+> Este desafío parece simple pero concentra exactamente los tres pasos que más confunden al principiante: dónde escribir la variable, cómo aplicarla sin reiniciar, y cómo verificar que realmente persiste.
+
+---
+
+#### Por qué es un desafío real
+
+El desafío tiene tres requisitos concretos que deben cumplirse todos juntos:
+
+| Requisito | Comandos involucrados |
+|-----------|----------------------|
+| Crear la variable en la sesión actual | `export PROJECT_DIR=...` |
+| Hacerla permanente en `.zshrc` | `nano ~/.zshrc` o `echo ... >> ~/.zshrc` |
+| Verificar que funciona | `echo $PROJECT_DIR` después de `source` |
+
+El error más común: hacer solo uno o dos de los tres pasos. Solo `export` no es permanente. Solo editar `.zshrc` sin `source` no la activa en la sesión actual. Solo `echo` sin haberla exportado muestra vacío.
+
+---
+
+#### Solución paso a paso
+
+**Paso 1 — Ir al directorio correcto**
+```bash
+cd /home/labex
+```
+
+**Paso 2 — Exportar la variable en la sesión actual**
+```bash
+export PROJECT_DIR=/home/labex/project
+```
+
+Esto crea la variable de inmediato en la sesión actual. Si cierras la terminal ahora, desaparece. Por eso necesitas el siguiente paso.
+
+**Paso 3 — Agregarla al archivo de configuración permanente**
+
+Opción A — con `echo >>` (más rápido, sin abrir editor):
+```bash
+echo 'export PROJECT_DIR=/home/labex/project' >> ~/.zshrc
+```
+
+Opción B — con `nano` (más visual):
+```bash
+nano ~/.zshrc
+```
+Al final del archivo agrega:
+```bash
+export PROJECT_DIR=/home/labex/project
+```
+Guarda con `Ctrl+O`, confirma con `Enter`, sal con `Ctrl+X`.
+
+**Paso 4 — Aplicar los cambios sin cerrar la terminal**
+```bash
+source ~/.zshrc
+```
+
+**Paso 5 — Verificar que funciona**
+```bash
+echo $PROJECT_DIR
+```
+```
+/home/labex/project
+```
+
+**Verificación adicional — confirmar que está en el entorno:**
+```bash
+env | grep PROJECT_DIR
+```
+```
+PROJECT_DIR=/home/labex/project
+```
+
+**Verificación de persistencia — confirmar que está en `.zshrc`:**
+```bash
+grep PROJECT_DIR ~/.zshrc
+```
+```
+export PROJECT_DIR=/home/labex/project
+```
+
+---
+
+#### Por qué falló la primera vez — análisis
+
+Los puntos donde típicamente se traba este desafío:
+
+**Traba 1 — Solo hacer `export` sin editar `.zshrc`**
+
+`export PROJECT_DIR=/home/labex/project` funciona en la sesión actual, pero al cerrar la terminal y volver a abrirla, la variable ya no existe. El desafío pide que sea **permanente**.
+
+**Traba 2 — Editar `.zshrc` pero olvidar `source`**
+
+Editar el archivo no aplica los cambios automáticamente. El archivo `.zshrc` solo se lee cuando se abre una nueva terminal. Para aplicarlo en la sesión actual sin reiniciar: `source ~/.zshrc`.
+
+**Traba 3 — Usar comillas dobles en el `echo >>` incorrecto**
+
+```bash
+# MAL — las variables se expanden antes de escribir
+echo "export PROJECT_DIR=$HOME/project" >> ~/.zshrc
+# Resultado en .zshrc: export PROJECT_DIR=/home/labex/project ← puede funcionar
+# pero si $HOME no está definido en ese momento, queda vacío
+
+# BIEN — texto literal, sin expansión
+echo 'export PROJECT_DIR=/home/labex/project' >> ~/.zshrc
+```
+
+Con comillas simples el texto se escribe exactamente como está — más seguro y predecible.
+
+**Traba 4 — El shell es Bash pero se edita `.zshrc`**
+
+Si el shell activo es Bash (`echo $SHELL` muestra `/bin/bash`), editar `.zshrc` no tiene efecto. El archivo correcto sería `~/.bashrc`. Siempre verificar el shell antes de editar el archivo de configuración.
+
+---
+
+#### La solución completa en un bloque
+
+Para un administrador que necesita hacer esto rápido y bien:
+
+```bash
+# 1. Agregar al archivo de configuración permanente
+echo 'export PROJECT_DIR=/home/labex/project' >> ~/.zshrc
+
+# 2. Aplicar en la sesión actual
+source ~/.zshrc
+
+# 3. Verificar
+echo $PROJECT_DIR
+env | grep PROJECT_DIR
+grep PROJECT_DIR ~/.zshrc
+```
+
+Los tres comandos de verificación responden tres preguntas distintas:
+- `echo $PROJECT_DIR` → ¿está activa en esta sesión?
+- `env | grep PROJECT_DIR` → ¿está en el entorno del proceso actual?
+- `grep PROJECT_DIR ~/.zshrc` → ¿quedó guardada para la próxima sesión?
+
+---
+
+#### Ejercicio — Lab 09
+
+**Entorno:** KillerCoda (Ubuntu/Zsh) o cualquier Linux.
+
+Replica el desafío completo con una variable diferente:
+
+1. Crea la variable permanente `LOG_DIR=/var/log` en tu shell.
+2. Agrégala a tu archivo de configuración (`~/.bashrc` o `~/.zshrc` según tu shell).
+3. Aplícala con `source`.
+4. Verifica con los tres comandos: `echo`, `env | grep`, `grep ~/.bashrc`.
+5. Abre una nueva terminal y verifica que la variable sigue disponible.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1 y 2 — agregar al archivo y exportar en la sesión actual
+echo 'export LOG_DIR=/var/log' >> ~/.bashrc
+export LOG_DIR=/var/log
+
+# Paso 3
+source ~/.bashrc
+
+# Paso 4 — verificación triple
+echo $LOG_DIR
+env | grep LOG_DIR
+grep LOG_DIR ~/.bashrc
+
+# Paso 5 — abrir nueva terminal y verificar
+echo $LOG_DIR    # debe mostrar /var/log
+```
+
+</details>
+
+---
+
+### Lab 10 — Empaquetar y Comprimir Archivos
+
+**Escenario:** Necesitas enviar un directorio completo a un servidor remoto. El directorio tiene decenas de archivos y subdirectorios. Si los copias uno a uno es lento y propenso a errores. La solución: empaquetar todo en un solo archivo y opcionalmente comprimirlo para que ocupe menos espacio.
+
+> En Linux, **empaquetar** y **comprimir** son dos operaciones distintas que se hacen con herramientas distintas. Entender esa diferencia es la clave de este lab — y es lo que confunde a la mayoría al principio.
+
+---
+
+#### La distinción fundamental: empaquetar ≠ comprimir
+
+| Operación | Qué hace | Herramienta | Resultado |
+|-----------|---------|-------------|----------|
+| **Empaquetar** | Une múltiples archivos en uno solo | `tar` | Un archivo más grande que los originales |
+| **Comprimir** | Reduce el tamaño de un archivo | `gzip`, `bzip2`, `xz` | Un archivo más pequeño |
+| **Empaquetar + comprimir** | Las dos cosas juntas | `tar + gzip` | Un archivo comprimido |
+
+**Analogía:** Empaquetar es meter ropa en una maleta — todo junto pero sin apretar. Comprimir es usar una bolsa de vacío para reducir el volumen. Se puede hacer una sin la otra, pero juntas son más útiles.
+
+**¿Por qué usar los dos pasos en vez de solo comprimir?**
+
+`gzip` solo comprime **un archivo a la vez**. No puede comprimir un directorio con subdirectorios. Por eso primero usas `tar` para unir todo en un archivo, y luego `gzip` para reducir ese archivo. O directamente `tar -z` que hace los dos pasos en un solo comando.
+
+---
+
+#### Estructura de prueba del lab
+
+```bash
+mkdir -p test_dir/{subdir1,subdir2}
+echo "This is file 1" > test_dir/file1.txt
+echo "This is file 2" > test_dir/file2.txt
+echo "This is in subdir1" > test_dir/subdir1/subfile1.txt
+echo "This is in subdir2" > test_dir/subdir2/subfile2.txt
+```
+
+```bash
+tree test_dir
+```
+```
+test_dir
+├── file1.txt
+├── file2.txt
+├── subdir1
+│   └── subfile1.txt
+└── subdir2
+    └── subfile2.txt
+```
+
+---
+
+#### `tar` — La herramienta de empaquetado de Linux
+
+`tar` viene de *Tape Archive* — originalmente se usaba para grabar archivos en cintas magnéticas. Hoy se usa para empaquetar cualquier conjunto de archivos en uno solo, conservando toda la estructura de directorios, permisos y metadatos.
+
+**Las flags de `tar` — la clave para no confundirse:**
+
+| Flag | Nombre | Qué hace |
+|------|--------|---------|
+| `-c` | **C**reate | **Crear** un archivo nuevo |
+| `-x` | e**X**tract | **Extraer** el contenido |
+| `-t` | lis**T** | **Listar** el contenido sin extraer |
+| `-v` | **V**erbose | Mostrar progreso (qué archivo procesa) |
+| `-f` | **F**ile | El siguiente argumento es el nombre del archivo |
+| `-z` | g**Z**ip | Comprimir/descomprimir con gzip |
+| `-C` | **C**hange dir | Cambiar al directorio indicado antes de operar |
+
+> El truco para memorizar: `c`rear, e`x`traer, lis`t`ar — son las tres operaciones principales. Todo lo demás son modificadores de cómo se hace.
+
+---
+
+#### Paso 1 — `tar -cvf`: crear archivo tar (sin compresión)
+
+```bash
+tar -cvf test_archive.tar test_dir
+```
+
+| Parte | Qué hace |
+|-------|---------|
+| `-c` | Crear un archivo nuevo |
+| `-v` | Verbose — muestra cada archivo mientras lo agrega |
+| `-f test_archive.tar` | El archivo resultante se llamará `test_archive.tar` |
+| `test_dir` | El directorio que se va a empaquetar |
+
+**Salida:**
+```
+test_dir/
+test_dir/subdir1/
+test_dir/subdir1/subfile1.txt
+test_dir/subdir2/
+test_dir/subdir2/subfile2.txt
+test_dir/file1.txt
+test_dir/file2.txt
+```
+
+Cada línea confirma que ese archivo o directorio fue incluido en el tar. Un `.tar` sin compresión es más grande que los originales porque incluye metadatos de cada archivo.
+
+---
+
+#### Paso 2 — `tar -tvf`: listar sin extraer
+
+```bash
+tar -tvf test_archive.tar
+```
+```
+drwxrwxr-x labex/labex    0 2026-04-13 11:53 test_dir/
+-rw-rw-r-- labex/labex   19 2026-04-13 11:54 test_dir/subdir1/subfile1.txt
+-rw-rw-r-- labex/labex   15 2026-04-13 11:53 test_dir/file1.txt
+...
+```
+
+`-t` (list) muestra el inventario completo con permisos, dueño, tamaño y fecha de cada entrada. Es la forma de verificar que el tar está íntegro **antes de borrar los originales**.
+
+---
+
+#### Paso 3 — `tar -xvf -C`: extraer en un directorio específico
+
+```bash
+mkdir extracted_tar
+tar -xvf test_archive.tar -C extracted_tar
+```
+
+| Parte | Qué hace |
+|-------|---------|
+| `-x` | Extraer el contenido |
+| `-v` | Mostrar cada archivo al extraerlo |
+| `-f test_archive.tar` | El archivo a extraer |
+| `-C extracted_tar` | Extraer dentro del directorio `extracted_tar` |
+
+> Sin `-C`, el tar se extrae en el directorio actual — puede sobreescribir archivos existentes. Siempre usa `-C directorio/` para controlar dónde van los archivos.
+
+---
+
+#### Paso 4 — `gzip`: comprimir por separado
+
+```bash
+gzip test_archive.tar
+```
+
+`gzip` toma el archivo, lo comprime y **reemplaza el original** por la versión comprimida con extensión `.gz`. No pide confirmación — el archivo `.tar` desaparece y aparece `.tar.gz`.
+
+```bash
+ls -lh test_archive.tar.gz
+```
+```
+-rw-rw-r-- 1 labex labex 301 Apr 13 11:57 test_archive.tar.gz
+```
+
+---
+
+#### La comparación de tamaños del lab
+
+El lab midió los tamaños para entender qué pasa con cada operación:
+
+```bash
+# Contenido real de los archivos
+find test_dir -type f -exec ls -l {} \; | awk '{total += $5} END {print total " bytes"}'
+```
+```
+68 bytes      ← el contenido de texto puro
+```
+
+```bash
+# El tar sin comprimir
+ls -lh test_archive_compare.tar
+```
+```
+10K           ← ¡más grande que los originales!
+```
+
+```bash
+# El tar comprimido con gzip
+ls -lh test_archive.tar.gz
+```
+```
+301 bytes     ← mucho más pequeño
+```
+
+```bash
+# Espacio en disco del directorio
+du -sh test_dir
+```
+```
+16K           ← espacio que ocupa en disco (incluye bloques del filesystem)
+```
+
+**Por qué el tar sin comprimir ocupa 10K si el contenido son 68 bytes:**
+
+Los sistemas de archivos trabajan con **bloques de disco** — la unidad mínima de almacenamiento. En Linux el bloque típico es de 4KB. Un archivo de 15 bytes ocupa 4KB completos en disco. Además, `tar` añade cabeceras de 512 bytes por cada archivo para guardar metadatos (permisos, fechas, dueño). Con archivos pequeños, los metadatos pueden pesar más que el contenido.
+
+| Archivo | Tamaño |
+|---------|--------|
+| Contenido real | 68 bytes |
+| Directorio en disco | 16 KB (bloques del filesystem) |
+| `.tar` (empaquetado) | 10 KB (cabeceras + contenido) |
+| `.tar.gz` (comprimido) | 301 bytes |
+
+> La compresión es más efectiva cuanto más grande y más repetitivo es el contenido. En archivos de texto pequeños como estos, el ratio es impresionante. En archivos de video o imágenes ya comprimidos, `gzip` apenas reduce el tamaño.
+
+---
+
+#### Paso 5 — `tar -czvf`: empaquetar y comprimir en un solo paso
+
+En la práctica, casi nunca se hace `tar` y `gzip` por separado. `tar` tiene la flag `-z` que llama a `gzip` automáticamente:
+
+```bash
+tar -czvf test_combined.tar.gz test_dir
+```
+
+| Flag combinada | Qué hace |
+|---------------|---------|
+| `-c` | Crear |
+| `-z` | Comprimir con gzip mientras empaqueta |
+| `-v` | Verbose |
+| `-f test_combined.tar.gz` | Nombre del archivo resultante |
+| `test_dir` | Lo que se empaqueta |
+
+**Listar el contenido del `.tar.gz`:**
+```bash
+tar -tzvf test_combined.tar.gz
+```
+`-t` + `-z` para listar un archivo comprimido con gzip.
+
+**Extraer el `.tar.gz`:**
+```bash
+mkdir extracted
+tar -xzvf test_combined.tar.gz -C extracted
+```
+
+---
+
+#### Paso 6 — `zip` y `unzip`: formato multiplataforma
+
+`zip` es un formato de compresión y empaquetado en un solo paso, con mejor compatibilidad multiplataforma — especialmente para compartir archivos con usuarios de Windows y macOS.
+
+**Crear un zip:**
+```bash
+zip -r test_archive.zip test_dir
+```
+
+| Parte | Qué hace |
+|-------|---------|
+| `-r` | **R**ecursivo — incluye subdirectorios |
+| `test_archive.zip` | Nombre del archivo resultante |
+| `test_dir` | Directorio a comprimir |
+
+**Salida:**
+```
+adding: test_dir/ (stored 0%)
+adding: test_dir/subdir1/subfile1.txt (deflated 5%)
+adding: test_dir/file1.txt (stored 0%)
+```
+
+`stored 0%` significa que ese archivo es tan pequeño que la compresión no ayuda — se guarda sin comprimir. `deflated 5%` significa que se comprimió un 5%.
+
+**Extraer un zip:**
+```bash
+unzip -d unzipped_files test_archive.zip
+```
+
+| Parte | Qué hace |
+|-------|---------|
+| `-d unzipped_files` | Extraer en el directorio `unzipped_files` |
+| `test_archive.zip` | El archivo a extraer |
+
+---
+
+#### Cuándo usar cada formato
+
+| Formato | Comando | Cuándo usarlo |
+|---------|---------|--------------|
+| `.tar` | `tar -cvf` | Agrupar sin comprimir — para transferencias rápidas donde el tamaño no importa |
+| `.tar.gz` | `tar -czvf` | El estándar de Linux — compresión buena, velocidad razonable |
+| `.tar.bz2` | `tar -cjvf` | Mejor compresión que gzip, más lento — para archivos muy grandes |
+| `.tar.xz` | `tar -cJvf` | La mejor compresión, el más lento — distribuciones de software |
+| `.zip` | `zip -r` | Compartir con Windows/macOS — máxima compatibilidad |
+
+> En Linux se usa casi siempre `.tar.gz`. En entornos donde el destino puede ser Windows, `.zip`. Para distribuciones de software muy grandes, `.tar.xz`.
+
+---
+
+#### Mapa mental de flags de `tar`
+
+Para no perderse con las flags, este mapa ayuda a visualizarlas:
+
+```
+tar  [acción]  [modificadores]  [archivo_resultado]  [fuente]
+      -c          -v                -f archivo.tar      directorio/
+      -x          -z (gzip)
+      -t          -j (bzip2)
+                  -J (xz)
+                  -C destino/
+```
+
+**Receta para las 6 operaciones más comunes:**
+
+```bash
+# 1. Empaquetar (sin comprimir)
+tar -cvf archivo.tar directorio/
+
+# 2. Empaquetar y comprimir (gzip)
+tar -czvf archivo.tar.gz directorio/
+
+# 3. Ver contenido de un tar
+tar -tvf archivo.tar
+
+# 4. Ver contenido de un tar.gz
+tar -tzvf archivo.tar.gz
+
+# 5. Extraer un tar
+tar -xvf archivo.tar -C destino/
+
+# 6. Extraer un tar.gz
+tar -xzvf archivo.tar.gz -C destino/
+```
+
+---
+
+#### `du -sh` — Medir el espacio en disco
+
+```bash
+du -sh test_dir
+```
+```
+16K   test_dir
+```
+
+| Flag | Qué hace |
+|------|---------|
+| `-s` | Summary — muestra el total del directorio, no archivo por archivo |
+| `-h` | Human-readable — muestra KB, MB, GB en vez de bloques |
+
+> `du` (disk usage) mide el espacio **real en disco** — que puede ser muy distinto del tamaño del contenido. Un archivo de 1 byte ocupa 4KB en disco si el bloque es de 4KB.
+
+---
+
+#### Errores frecuentes — Lab 10
+
+**`gzip directorio/` en vez de comprimirlo con tar primero**
+
+`gzip` solo opera sobre archivos individuales — no puede comprimir directorios directamente. El error: `gzip: directorio/: Is a directory`. Solución: primero `tar -cvf archivo.tar directorio/` y luego `gzip archivo.tar`, o directamente `tar -czvf archivo.tar.gz directorio/`.
+
+**`tar -xvf archivo.tar` sin `-C` — extrae en el directorio actual**
+
+Si el tar contiene una carpeta `project/` y lo extraes sin `-C`, aparece una carpeta `project/` en tu directorio actual que puede sobreescribir trabajo existente. Siempre especifica el destino con `-C directorio/`.
+
+**`zip archivo.zip directorio/` sin `-r`**
+
+Sin `-r`, `zip` solo agrega el directorio vacío — no su contenido. Siempre `zip -r` para incluir subdirectorios y archivos.
+
+**`tar -xzvf` en un `.tar` sin comprimir**
+
+Si el archivo no está comprimido con gzip, usar `-z` da error o extrae incorrectamente. Para un `.tar` normal, omite la `z`: `tar -xvf archivo.tar`. Para un `.tar.gz`, sí usa `z`: `tar -xzvf archivo.tar.gz`.
+
+**Borrar los originales antes de verificar el tar**
+
+El flujo correcto es: crear tar → verificar con `-t` → borrar originales. Si borras antes de verificar y el tar estaba incompleto o corrupto, los datos se pierden.
+
+---
+
+#### Ejercicio — Lab 10
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Preparación:**
+```bash
+mkdir -p ~/practica-compress/{documentos,imagenes,scripts}
+echo "Reporte Q1" > ~/practica-compress/documentos/q1.txt
+echo "Reporte Q2" > ~/practica-compress/documentos/q2.txt
+echo "#!/bin/bash" > ~/practica-compress/scripts/deploy.sh
+touch ~/practica-compress/imagenes/logo.png
+```
+
+**Tareas:**
+
+1. Empaqueta `practica-compress/` en `backup.tar` sin comprimir.
+2. Lista el contenido del tar con `-t` para verificar que todos los archivos están.
+3. Comprime `backup.tar` con `gzip` y observa el cambio de nombre.
+4. Crea desde cero un `backup_v2.tar.gz` usando el flag `-z` en un solo comando.
+5. Extrae `backup_v2.tar.gz` en un directorio llamado `restaurado/`.
+6. Crea un `backup.zip` del mismo directorio con `zip -r`.
+7. Extrae el zip en `desde_zip/` con `unzip -d`.
+8. Usa `du -sh` para comparar el tamaño de `practica-compress/` con los archivos generados.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+cd ~
+
+# Paso 1
+tar -cvf backup.tar practica-compress/
+
+# Paso 2
+tar -tvf backup.tar
+
+# Paso 3
+gzip backup.tar
+ls -lh backup.tar.gz
+
+# Paso 4
+tar -czvf backup_v2.tar.gz practica-compress/
+
+# Paso 5
+mkdir restaurado
+tar -xzvf backup_v2.tar.gz -C restaurado/
+
+# Paso 6
+zip -r backup.zip practica-compress/
+
+# Paso 7
+unzip -d desde_zip backup.zip
+
+# Paso 8
+du -sh practica-compress/
+du -sh backup.tar.gz backup_v2.tar.gz backup.zip
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -3144,6 +3742,17 @@ echo $VERSION   # vacío
 | `echo $HOME` | Muestra el directorio home del usuario actual | 08 |
 | `echo $USER` | Muestra el nombre del usuario actual | 08 |
 | `echo $SHELL` | Muestra el shell que se está usando | 08 |
+| `tar -cvf arch.tar dir/` | Empaquetar un directorio (sin compresión) | 10 |
+| `tar -tvf arch.tar` | Listar contenido del tar sin extraer | 10 |
+| `tar -xvf arch.tar -C destino/` | Extraer tar en un directorio específico | 10 |
+| `tar -czvf arch.tar.gz dir/` | Empaquetar y comprimir con gzip en un paso | 10 |
+| `tar -tzvf arch.tar.gz` | Listar contenido de un tar.gz | 10 |
+| `tar -xzvf arch.tar.gz -C destino/` | Extraer un tar.gz en un directorio | 10 |
+| `gzip archivo` | Comprimir un archivo (reemplaza el original con .gz) | 10 |
+| `gunzip archivo.gz` | Descomprimir un archivo .gz | 10 |
+| `zip -r arch.zip directorio/` | Crear archivo zip recursivo (multiplataforma) | 10 |
+| `unzip -d destino/ arch.zip` | Extraer zip en un directorio específico | 10 |
+| `du -sh directorio/` | Muestra el espacio en disco del directorio | 10 |
 
 ---
 
@@ -3310,3 +3919,18 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **`$OLDPWD`** | Directorio anterior — es lo que usa `cd -` internamente |
 | **`<< 'EOF'`** | Here-document con expansión desactivada — las variables no se expanden al escribir el archivo |
 | **`<< EOF`** | Here-document normal — las variables se expanden mientras se escribe el archivo |
+| **Empaquetar** | Unir múltiples archivos en uno solo sin reducir tamaño — lo hace `tar` |
+| **Comprimir** | Reducir el tamaño de un archivo mediante algoritmos — lo hacen `gzip`, `bzip2`, `xz` |
+| **`tar`** | Tape Archive — herramienta de empaquetado que conserva estructura, permisos y metadatos |
+| **`.tar`** | Archivo empaquetado sin compresión — puede ser más grande que los originales |
+| **`.tar.gz`** | Archivo empaquetado con `tar` y comprimido con `gzip` — el formato más común en Linux |
+| **`.tar.bz2`** | Empaquetado con tar y comprimido con bzip2 — mejor compresión, más lento que gzip |
+| **`.tar.xz`** | Empaquetado con tar y comprimido con xz — la mejor compresión, el más lento |
+| **`gzip`** | GNU Zip — compresor de archivos individuales, muy usado en Linux |
+| **`zip`** | Formato de compresión y empaquetado con mejor compatibilidad en Windows y macOS |
+| **`-z` en tar** | Flag que activa la compresión gzip — equivale a hacer tar y gzip en un solo paso |
+| **`-C` en tar** | Cambia al directorio indicado antes de operar — controla dónde se extraen los archivos |
+| **Bloque de disco** | Unidad mínima de almacenamiento — un archivo pequeño puede ocupar 4KB aunque tenga solo 1 byte |
+| **`du`** | Disk Usage — mide el espacio real que ocupa en disco un archivo o directorio |
+| **`stored 0%`** | En zip: el archivo se guarda sin comprimir porque es demasiado pequeño para beneficiarse |
+| **`deflated N%`** | En zip: el archivo se comprimió un N% respecto a su tamaño original |
