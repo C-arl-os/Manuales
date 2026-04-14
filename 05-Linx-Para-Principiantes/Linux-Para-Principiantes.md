@@ -22,6 +22,7 @@
   - [Lab 09 — Desafío: Variable de Entorno Permanente](#lab-09--desafío-variable-de-entorno-permanente)
   - [Lab 10 — Empaquetar y Comprimir Archivos](#lab-10--empaquetar-y-comprimir-archivos)
   - [Lab 11 — Desafío: Respaldo de Logs del Sistema](#lab-11--desafío-respaldo-de-logs-del-sistema)
+  - [Lab 12 — Discos, Particiones y Sistemas de Archivos](#lab-12--discos-particiones-y-sistemas-de-archivos)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -3872,6 +3873,682 @@ tar -tzvf ~/respaldos/etc_$(date +%Y-%m-%d).tar.gz | wc -l
 
 ---
 
+### Lab 12 — Discos, Particiones y Sistemas de Archivos
+
+**Escenario:** El servidor de producción tiene un disco casi lleno. El equipo necesita saber qué directorio está consumiendo más espacio, agregar un disco nuevo, formatearlo con el sistema de archivos correcto y montarlo para poder usarlo. Este es el flujo completo que se repite en cualquier empresa que administra servidores Linux.
+
+> Este lab toca una de las habilidades más críticas de la administración de sistemas: entender dónde está el espacio en disco, cómo están organizados los discos, y cómo preparar almacenamiento nuevo para usarlo. Sin esto, no puedes resolver "el servidor no arranca", "el directorio /var está lleno" o "necesitamos más espacio para los logs".
+
+---
+
+#### Los tres conceptos que hay que entender antes de empezar
+
+Antes de ver los comandos, hay que construir el modelo mental correcto. La confusión con discos en Linux viene casi siempre de no tener claro estos tres conceptos.
+
+---
+
+**Concepto 1 — Sistema de archivos (Filesystem)**
+
+Un disco recién sacado de la caja es como una hoja en blanco: no tiene estructura, no tiene carpetas, no sabe nada de archivos. Antes de poder guardar información en él, hay que **formatearlo** con un sistema de archivos.
+
+El sistema de archivos es el lenguaje que usa el disco para organizar información. Define:
+- Cómo se dividen los bloques en el disco
+- Dónde se guarda el nombre de cada archivo
+- Quién es el dueño
+- Cuándo fue modificado
+- A qué bloque físico del disco pertenece cada pedazo del archivo
+
+Piénsalo como el índice de un libro: sin el índice, las páginas existen pero no sabes dónde está nada.
+
+**La evolución: ext2 → ext3 → ext4**
+
+En Linux, la familia de sistemas de archivos más usada históricamente es la familia `ext`. Entender su evolución explica por qué hoy se usa `ext4` y no los anteriores.
+
+| Sistema | Año | Novedad principal | Problema que resuelve | Limitación que dejó |
+|---------|-----|------------------|-----------------------|---------------------|
+| **ext2** | 1993 | Sistema de archivos moderno para Linux | El primero estable para Linux | Sin journaling — si el sistema se apaga de golpe, los datos pueden corromperse |
+| **ext3** | 2001 | **Journaling** | Un corte de luz ya no corrompe el sistema — el disco sabe volver a un estado consistente | Archivos máximo 2 TB, más lento que ext2 en algunas operaciones |
+| **ext4** | 2008 | **Extents** + escalabilidad | Archivos hasta 16 TB, filesystem hasta 1 Exabyte, mucho más rápido que ext3 | Es el estándar actual — sin limitaciones relevantes para uso normal |
+
+**¿Qué es el journaling y por qué fue tan importante?**
+
+Imagina que estás escribiendo un archivo de 50 MB. A mitad de escritura, se va la luz. Sin journaling (ext2): el archivo queda a medias, el sistema de archivos no sabe si los bloques fueron asignados o no, y al arrancar necesitas ejecutar `fsck` (file system check) — que puede tardar minutos o horas en discos grandes, y a veces no puede recuperar nada.
+
+Con journaling (ext3 en adelante): antes de escribir cualquier cambio real, el sistema escribe en una pequeña área especial llamada **journal** (bitácora) exactamente qué va a hacer. Si se va la luz, al reiniciar, el sistema lee el journal y dice: "ah, estaba en medio de esta operación, la deshago o la completo". El disco vuelve a un estado consistente en segundos, sin perder datos de otros archivos.
+
+**¿Qué son los extents en ext4?**
+
+En ext3, un archivo se describía bloque a bloque: "el archivo está en el bloque 100, 101, 102, 103...". Para un archivo de 1 GB eso significa miles de entradas en la tabla. Con los **extents** de ext4, en cambio, se puede decir: "el archivo está en los bloques del 100 al 350.000, contiguos" — una sola entrada. Esto hace que la lectura y escritura de archivos grandes sea dramáticamente más rápida.
+
+**¿Por qué ext4 en campo laboral y no XFS o btrfs?**
+
+| Sistema | Cuándo se usa en campo real |
+|---------|---------------------------|
+| **ext4** | El estándar para servidores Ubuntu/Debian — amplio soporte de herramientas, maduro, predecible |
+| **XFS** | Estándar en Red Hat Enterprise Linux (RHEL) y CentOS — excelente para archivos muy grandes y alta concurrencia |
+| **btrfs** | Sistemas modernos (openSUSE, Fedora) — tiene snapshots integrados, pero más complejo de administrar |
+| **NTFS** | Windows — Linux puede leerlo pero no está optimizado para él |
+| **FAT32/exFAT** | Memorias USB y tarjetas SD — máxima compatibilidad entre sistemas operativos |
+
+En la práctica: si eres sysadmin en un entorno Ubuntu/Debian, usarás ext4 para casi todo. En Red Hat/CentOS, usarás XFS. Para discos externos, exFAT.
+
+---
+
+**Concepto 2 — Montaje (Mounting)**
+
+En Windows, cada disco aparece automáticamente como una letra: `C:`, `D:`, `E:`. En Linux no existe eso. En Linux, **todo es parte de un único árbol de directorios** que empieza en `/`. Para que el contenido de un disco sea accesible, hay que decirle al sistema: "el contenido de este disco aparece aquí, en este directorio".
+
+Ese directorio donde "aterriza" el disco se llama **punto de montaje**. El proceso de conectar el disco a ese directorio se llama **montar**.
+
+```
+Sin montar:           Después de montar /dev/sdb1 en /mnt/datos:
+/                     /
+├── home/             ├── home/
+├── etc/              ├── etc/
+└── mnt/              └── mnt/
+    └── datos/  ←—        └── datos/     ← aquí aparece el contenido del disco
+                               ├── proyecto/
+                               └── backups/
+```
+
+En el campo real, los puntos de montaje más comunes son:
+- `/mnt/` — montajes temporales (un disco que conectas para copiar algo)
+- `/media/` — discos externos (USB, DVD) — algunos sistemas los montan aquí automáticamente
+- `/data/` o `/opt/` — en servidores, particiones dedicadas para datos o software
+- `/var/` — a veces en su propia partición para que si los logs llenan el disco, no afecten el sistema
+
+---
+
+**Concepto 3 — Particiones**
+
+Un disco físico se puede dividir en secciones independientes llamadas **particiones**. Cada partición se comporta como si fuera un disco separado: tiene su propio sistema de archivos, su propio espacio, y se monta en un punto diferente.
+
+Razones para particionar un disco en campo real:
+- **Separar `/` de `/home`**: si `/home` se llena de archivos de usuario, el sistema sigue funcionando porque `/` tiene su propio espacio
+- **Separar `/var/log`**: los logs nunca pueden llenar el disco del sistema operativo
+- **Sistemas de archivos diferentes**: la partición del SO en ext4, una partición de datos en XFS
+- **Swap**: partición especial sin sistema de archivos, usada como memoria virtual cuando la RAM se llena
+- **Recuperación**: si el SO falla, los datos en otras particiones siguen intactos
+
+En el lab, el comando `fdisk -l` muestra la tabla de particiones del sistema:
+
+```
+/dev/nvme0n1p1 *     2048 83886046 83883999  40G 83 Linux
+```
+
+Esto significa: disco `/dev/nvme0n1`, partición número 1, marcada como booteable (`*`), 40 GB, tipo Linux. El `p1` al final del nombre es la convención para discos NVMe — en discos SATA tradicionales sería `/dev/sda1`.
+
+---
+
+#### `df` — Ver el uso del disco por sistema de archivos
+
+**Sintaxis:**
+```bash
+df               # muestra todos los filesystems montados en bloques de 1K
+df -h            # human-readable — muestra GB, MB en vez de bloques
+df -h /ruta      # solo el filesystem donde vive esa ruta
+df -T            # también muestra el tipo de sistema de archivos (ext4, tmpfs, etc.)
+```
+
+**Qué hace:** Muestra cuánto espacio tiene cada filesystem montado, cuánto está usado, cuánto libre y en qué porcentaje. `df` responde la pregunta "¿cuánto espacio libre hay?".
+
+**Ejemplo del lab:**
+```bash
+df -h
+```
+```
+Filesystem      Size  Used Avail Use% Mounted on
+overlay          20G  126M   20G   1% /
+tmpfs            64M     0   64M   0% /dev
+tmpfs           7.7G     0  7.7G   0% /sys/fs/cgroup
+shm              64M     0   64M   0% /dev/shm
+/dev/nvme1n1    100G   19G   82G  19% /etc/hosts
+```
+
+**Qué significa cada columna:**
+
+| Columna | Qué muestra |
+|---------|------------|
+| `Filesystem` | El dispositivo o tipo de sistema de archivos |
+| `Size` | El tamaño total del filesystem |
+| `Used` | Espacio ocupado |
+| `Avail` | Espacio disponible para uso |
+| `Use%` | Porcentaje de uso — la columna que más miras como sysadmin |
+| `Mounted on` | El directorio donde está montado |
+
+**Tipos de filesystem que aparecen en el lab y qué son:**
+
+| Filesystem | Tipo | Para qué existe |
+|-----------|------|----------------|
+| `overlay` | Overlay FS | Lo que usa Docker/contenedores — capas de filesystem apiladas |
+| `tmpfs` | RAM filesystem | Vive en memoria RAM — `/dev/shm` es memoria compartida, muy rápido pero volátil |
+| `/sys/fs/cgroup` | cgroup FS | Control de grupos de procesos (límites de CPU/RAM para contenedores) |
+| `/dev/nvme1n1` | Disco real NVMe | El disco físico de la máquina — el que tiene los datos reales |
+
+> `overlay` aparece porque el lab de LabEx corre en un contenedor Docker. En un servidor real verías directamente `/dev/sda1` o `/dev/nvme0n1p1` montado en `/`.
+
+**En campo real, los umbrales que importan:**
+
+Un sysadmin configura alertas en estos niveles:
+- **70%** — empezar a monitorear
+- **80%** — planificar limpieza o ampliación
+- **90%** — acción inmediata requerida
+- **95%+** — el sistema puede comenzar a fallar: logs no se escriben, aplicaciones no guardan datos, bases de datos pueden corromperse
+
+**Diferencia entre `df` sin flags (bloques de 1K) y `df -h`:**
+
+El `df` sin flags devuelve los valores en bloques de 1024 bytes. Para humanos es prácticamente ilegible:
+```
+/dev/nvme1n1   104806400 18921756  85884644  19%  /etc/hosts
+```
+Con `-h` se convierte en:
+```
+/dev/nvme1n1    100G   19G   82G  19%  /etc/hosts
+```
+Siempre usa `-h` cuando estás inspeccionando manualmente. Solo usa sin `-h` cuando el resultado se procesa con otro comando (porque los números exactos son más fáciles de comparar programáticamente).
+
+---
+
+#### `du` — Medir cuánto espacio ocupa un directorio
+
+**Sintaxis:**
+```bash
+du -sh directorio/          # tamaño total del directorio (resumen)
+du -h --max-depth=1 ~       # tamaños de primer nivel, sin entrar recursivamente
+du -sh ~/*                  # tamaño de cada cosa dentro del home
+du -h ~ | sort -rh | head   # los 10 más grandes en el home
+```
+
+**Qué hace:** Mide el espacio real en disco que ocupa cada directorio y sus subdirectorios. `du` responde la pregunta "¿qué directorio está comiendo el espacio?". `df` te dice que el disco está lleno; `du` te dice quién es el culpable.
+
+**Ejemplo del lab — investigación completa:**
+
+```bash
+# Paso 1: ¿Cuánto pesa el home entero?
+du -sh ~
+```
+```
+2.1G    /home/labex
+```
+
+```bash
+# Paso 2: ¿Qué hay en el primer nivel?
+du -h --max-depth=1 ~
+```
+```
+32K     /home/labex/.codeblocks
+148K    /home/labex/.config
+9.3M    /home/labex/.oh-my-zsh
+844M    /home/labex/.cache
+900M    /home/labex/.local
+18M     /home/labex/.npm
+333M    /home/labex/golang
+2.1G    /home/labex
+```
+
+```bash
+# Paso 3: ¿Quiénes son los 10 más grandes?
+du -h ~ | sort -rh | head -n 10
+```
+```
+2.1G    /home/labex
+900M    /home/labex/.local
+844M    /home/labex/.cache
+763M    /home/labex/.cache/puppeteer/chrome/linux-113.0.5672.63/chrome-linux64
+763M    /home/labex/.cache/puppeteer/chrome/linux-113.0.5672.63
+763M    /home/labex/.cache/puppeteer/chrome
+763M    /home/labex/.cache/puppeteer
+601M    /home/labex/.local/share
+579M    /home/labex/.local/share/code-server/extensions
+579M    /home/labex/.local/share/code-server
+```
+
+**Cómo leer esta investigación:**
+
+El home pesa 2.1G. `.local` tiene 900M y `.cache` tiene 844M — juntos son prácticamente todo el espacio. Dentro de `.cache`, hay una copia de Chrome (763M) guardada por Puppeteer (herramienta de automatización de navegadores). En `.local` hay extensiones de code-server (579M). Esto es exactamente lo que harías en producción cuando un servidor tiene el disco lleno: desciender nivel por nivel hasta encontrar el directorio culpable.
+
+**Análisis del pipeline `du -h ~ | sort -rh | head -n 10`:**
+
+```
+du -h ~          → genera una línea por cada directorio con su tamaño
+     |
+sort -rh         → -r: orden inverso (mayor primero), -h: entiende K/M/G como humano
+     |
+head -n 10       → toma solo las primeras 10 líneas
+```
+
+> `sort -h` es el detalle crítico aquí. Sin `-h`, `sort` ordena alfabéticamente y `9M` quedaría después de `844M` porque `9` > `8` en orden de texto. Con `-h`, entiende que `844M` es mayor que `9M`.
+
+**`du -sh ~/*` vs `du -h --max-depth=1 ~`:**
+
+```bash
+du -sh ~/*          # solo archivos/dirs visibles (no empieza con .)
+du -h --max-depth=1 ~   # incluye archivos ocultos (los que empiezan con .)
+```
+
+En el lab, `du -sh ~/*` mostró solo 3 entradas (Code, Desktop, golang) porque los archivos que más pesan (`~/.cache`, `~/.local`) son ocultos. Con `--max-depth=1` sí aparecen. En un servidor real, siempre usa `--max-depth=1` para no perderte nada.
+
+---
+
+#### `dd` — Crear un disco virtual
+
+**Sintaxis:**
+```bash
+dd if=FUENTE of=DESTINO bs=TAMAÑO count=NUMERO
+```
+
+**Qué hace:** `dd` (disk dump / data duplicator) copia datos bloque a bloque entre dispositivos o archivos. En este lab se usa para crear un archivo que simula un disco físico.
+
+**El comando del lab:**
+```bash
+dd if=/dev/zero of=virtual.img bs=1M count=256
+```
+
+| Parte | Qué hace |
+|-------|---------|
+| `if=/dev/zero` | Input file: `/dev/zero` es un dispositivo especial que produce ceros infinitamente |
+| `of=virtual.img` | Output file: el archivo donde se guardan esos ceros — el "disco virtual" |
+| `bs=1M` | Block size: escribe bloques de 1 megabyte a la vez |
+| `count=256` | Cuántos bloques escribir: 256 × 1M = 256 MB en total |
+
+**Qué es `/dev/zero`:** Es un dispositivo especial de Linux que, cuando lo lees, produce ceros indefinidamente. Junto con `/dev/null` (descarta todo) y `/dev/random` (genera datos aleatorios), son los tres "dispositivos vacíos" más usados. Escribir ceros es la forma de crear un archivo con un tamaño definido y contenido conocido.
+
+**Resultado:**
+```
+256+0 records in
+256+0 records out
+268435456 bytes (268 MB) copied
+```
+```bash
+ls -lh virtual.img
+```
+```
+-rw-rw-r-- 1 labex labex 256M Apr 14 11:03 virtual.img
+```
+
+Se creó un archivo de 256 MB. Ese archivo es la representación de un disco — no tiene sistema de archivos todavía, es solo espacio vacío.
+
+**Usos reales de `dd` en campo laboral:**
+- Crear imágenes de respaldo de discos completos: `dd if=/dev/sda of=backup.img`
+- Crear tarjetas USB arrancables: `dd if=ubuntu.iso of=/dev/sdb bs=4M`
+- Crear archivos de swap: `dd if=/dev/zero of=/swapfile bs=1G count=2`
+- Probar velocidad de escritura de disco: `dd if=/dev/zero of=test bs=1M count=1000`
+
+> **Advertencia:** `dd` opera a nivel de bloques crudos, sin protecciones. `dd if=/dev/zero of=/dev/sda` borra completamente el disco `/dev/sda` sin preguntar nada. Es una de las pocas herramientas de Linux que puede destruir datos de forma irreversible con un solo comando mal escrito.
+
+---
+
+#### `mkfs.ext4` — Formatear el disco virtual
+
+**Sintaxis:**
+```bash
+sudo mkfs.ext4 archivo_o_dispositivo
+sudo mkfs.ext4 /dev/sdb1            # formatear una partición real
+sudo mkfs.ext4 virtual.img          # formatear un archivo como si fuera un disco
+sudo mkfs -t ext4 /dev/sdb1         # variante equivalente
+```
+
+**Qué hace:** Crea un sistema de archivos ext4 en el dispositivo o archivo indicado. Después de este comando, el "disco" ya tiene estructura: sabe dónde guardar archivos, tiene un directorio raíz, tiene espacio para metadatos.
+
+**Ejemplo del lab:**
+```bash
+sudo mkfs.ext4 virtual.img
+```
+```
+mke2fs 1.46.5 (30-Dec-2021)
+Discarding device blocks: done
+Creating filesystem with 65536 4k blocks and 65536 inodes
+Filesystem UUID: 74e7ebed-ee16-49ba-8901-cd702012329d
+Superblock backups stored on blocks:
+    32768
+
+Allocating group tables: done
+Writing inode tables: done
+Creating journal (4096 blocks): done
+Writing superblocks and filesystem accounting information: done
+```
+
+**Qué significa esta salida — línea por línea:**
+
+| Línea | Significado |
+|-------|------------|
+| `Creating filesystem with 65536 4k blocks and 65536 inodes` | 65536 bloques de 4KB = 256MB. El número de inodes determina cuántos archivos puede contener (uno por archivo) |
+| `Filesystem UUID: 74e7ebed-...` | Identificador único universal del filesystem — se usa para montaje confiable en lugar de nombres de dispositivo |
+| `Superblock backups stored on blocks: 32768` | El superbloque contiene la info crítica del filesystem. Se hace copia de seguridad en otros bloques por si el primero se corrompe |
+| `Writing inode tables: done` | Crea la tabla de inodes — la estructura que guarda los metadatos de cada archivo |
+| `Creating journal (4096 blocks): done` | Crea el journal de ext4 — la bitácora que garantiza consistencia ante cortes de luz |
+| `Writing superblocks and filesystem accounting information: done` | Guarda la info del filesystem (tamaño, inodes libres, bloques libres) |
+
+**¿Qué es un inode?**
+
+Un inode es la ficha técnica de un archivo. Cada archivo tiene exactamente un inode que contiene:
+- El dueño (UID, GID)
+- Los permisos
+- Fechas (creación, modificación, acceso)
+- El tamaño
+- Los bloques del disco donde está el contenido
+
+Lo que el inode **no** guarda es el nombre del archivo — el nombre vive en el directorio. Por eso en Linux puedes tener dos nombres para el mismo archivo (hard links): dos entradas en el directorio apuntan al mismo inode.
+
+Cuando un disco reporta "no space left" pero `df` muestra espacio libre, el problema puede ser que se agotaron los inodes — hay espacio físico pero no hay más fichas para crear archivos nuevos. Puedes verificarlo con `df -i`.
+
+---
+
+#### `mount` — Montar un filesystem
+
+**Sintaxis:**
+```bash
+sudo mount dispositivo punto_de_montaje
+sudo mount -o loop archivo.img punto_de_montaje   # montar un archivo como disco
+sudo mount -t ext4 /dev/sdb1 /mnt/datos           # especificar el tipo de filesystem
+mount                                              # listar todo lo que está montado
+mount | grep patron                                # filtrar montajes
+```
+
+**Qué hace:** Conecta un filesystem a un punto del árbol de directorios. Después de montar, el contenido del disco aparece como si fuera una carpeta normal.
+
+**El flag `-o loop` — qué es un loop device:**
+
+Los loop devices (`/dev/loop0`, `/dev/loop1`, etc.) son dispositivos virtuales que hacen que un **archivo** se comporte como si fuera un **disco físico**. Cuando el kernel ve `/dev/loop0`, lo trata exactamente igual que si fuera un disco real — pero internamente sabe que los datos están en un archivo.
+
+`-o loop` le dice a `mount` que primero cree un loop device para el archivo, y luego monte ese loop device.
+
+```bash
+sudo mkdir /mnt/virtualdisk
+sudo mount -o loop virtual.img /mnt/virtualdisk
+```
+
+**Verificar que quedó montado:**
+```bash
+mount | grep virtualdisk
+```
+```
+/home/labex/project/virtual.img on /mnt/virtualdisk type ext4 (rw,relatime)
+```
+
+**Qué significa esta línea:**
+
+| Parte | Qué dice |
+|-------|---------|
+| `/home/labex/project/virtual.img` | El origen — en este caso un archivo |
+| `on /mnt/virtualdisk` | El punto de montaje — donde aparece el contenido |
+| `type ext4` | El sistema de archivos que se detectó |
+| `(rw,relatime)` | Opciones: rw = lectura y escritura; relatime = la fecha de acceso se actualiza solo si es anterior a la de modificación (optimización de rendimiento) |
+
+**Usar el disco montado:**
+```bash
+sudo touch /mnt/virtualdisk/testfile
+ls /mnt/virtualdisk
+```
+```
+lost+found  testfile
+```
+
+`lost+found` es un directorio especial que crea `mkfs.ext4`. Sirve de repositorio para archivos que el sistema de recuperación (`fsck`) encuentra al reparar el filesystem — archivos cuyos inodes existen pero cuyo nombre se perdió por una corrupción.
+
+**Montaje automático al arrancar — `/etc/fstab`:**
+
+En producción, los discos se montan automáticamente al arrancar usando el archivo `/etc/fstab`. Un ejemplo de entrada:
+```
+/dev/sdb1    /mnt/datos    ext4    defaults    0    2
+UUID=74e7ebed-ee16-49ba-8901-cd702012329d    /mnt/datos    ext4    defaults    0    2
+```
+
+Se recomienda usar el UUID (que viste en la salida de `mkfs.ext4`) en vez del nombre del dispositivo — porque si agregas otro disco, el nombre puede cambiar de `/dev/sdb` a `/dev/sdc`, pero el UUID siempre identifica el mismo disco.
+
+---
+
+#### `umount` — Desmontar un filesystem
+
+**Sintaxis:**
+```bash
+sudo umount /mnt/punto_de_montaje    # desmontar por punto de montaje
+sudo umount /dev/dispositivo         # desmontar por dispositivo
+```
+
+**Qué hace:** Desconecta el filesystem del árbol de directorios. Después de desmontar, el punto de montaje queda vacío (vuelve a ser una carpeta vacía).
+
+**Ejemplo del lab:**
+```bash
+sudo umount /mnt/virtualdisk
+```
+
+**¿Por qué hay que desmontar antes de desconectar un disco?**
+
+Cuando escribes datos, el kernel no los escribe inmediatamente al disco — los guarda en un buffer en memoria para optimizar rendimiento y los vacía (flush) periódicamente. Si desconectas el disco sin desmontar, puede haber datos en el buffer que todavía no llegaron al disco físico — esos datos se pierden y el filesystem queda en estado inconsistente.
+
+`umount` espera a que todos los buffers se vacíen antes de completarse. Es equivalente al "expulsar dispositivo" de Windows o macOS.
+
+**Error frecuente — "device is busy":**
+```
+umount: /mnt/virtualdisk: target is busy
+```
+Esto ocurre cuando hay un proceso que tiene un archivo abierto en ese directorio, o cuando tu propio shell está dentro del punto de montaje (`cd /mnt/virtualdisk` y luego intentas desmontarlo). Soluciones:
+```bash
+# Ver qué proceso está usando el disco
+lsof /mnt/virtualdisk
+# O salir del directorio primero
+cd ~
+sudo umount /mnt/virtualdisk
+```
+
+---
+
+#### `fdisk -l` — Ver la tabla de particiones
+
+**Sintaxis:**
+```bash
+sudo fdisk -l                  # lista todos los discos y sus particiones
+sudo fdisk -l /dev/sda         # solo el disco indicado
+sudo fdisk -l virtual.img      # también funciona con archivos de imagen
+```
+
+**Qué hace:** Muestra información detallada de todos los discos detectados: tamaño, modelo, sectores, y la tabla de particiones de cada uno.
+
+**Ejemplo del lab — salida completa:**
+```bash
+sudo fdisk -l
+```
+```
+Disk /dev/loop4: 200 MiB, 209715200 bytes, 409600 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+
+
+Disk /dev/nvme1n1: 100 GiB, 107374182400 bytes, 209715200 sectors
+Disk model: Alibaba Cloud Elastic Block Storage
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+
+
+Disk /dev/nvme0n1: 40 GiB, 42949672960 bytes, 83886080 sectors
+Disk model: Alibaba Cloud Elastic Block Storage
+Units: sectors of 1 * 512 = 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: dos
+Disk identifier: 0xfcadb325
+
+Device         Boot Start      End  Sectors Size Id Type
+/dev/nvme0n1p1 *     2048 83886046 83883999  40G 83 Linux
+```
+
+**Qué hay en este sistema:**
+
+| Disco | Tamaño | Qué es |
+|-------|--------|--------|
+| `/dev/loop4` | 200 MiB | Un loop device — hay un archivo de imagen montado como disco |
+| `/dev/nvme1n1` | 100 GiB | Disco NVMe real — en LabEx es el almacenamiento del contenedor |
+| `/dev/nvme0n1` | 40 GiB | El disco del sistema operativo — tiene la partición de arranque |
+
+**Desglosando la tabla de particiones:**
+```
+Device         Boot Start      End  Sectors Size Id Type
+/dev/nvme0n1p1 *     2048 83886046 83883999  40G 83 Linux
+```
+
+| Columna | Valor | Qué significa |
+|---------|-------|--------------|
+| `Device` | `/dev/nvme0n1p1` | Nombre del dispositivo — disco `nvme0n1`, partición `p1` |
+| `Boot` | `*` | Esta partición es booteable — el gestor de arranque (GRUB) la busca aquí |
+| `Start` | `2048` | El primer sector de la partición (los primeros 2048 sectores están reservados para el MBR) |
+| `End` | `83886046` | El último sector |
+| `Sectors` | `83883999` | Total de sectores en la partición |
+| `Size` | `40G` | Tamaño total |
+| `Id` | `83` | Tipo de partición en hexadecimal — 83 significa Linux (ext2/3/4) |
+| `Type` | `Linux` | Descripción del tipo |
+
+**Convenciones de nombres de dispositivos en Linux:**
+
+| Nombre | Tipo de disco |
+|--------|--------------|
+| `/dev/sda`, `/dev/sdb` | Disco SATA o SAS — el más común en servidores tradicionales |
+| `/dev/nvme0n1`, `/dev/nvme1n1` | Disco NVMe — los SSD modernos de alta velocidad |
+| `/dev/vda`, `/dev/vdb` | Disco virtual — en máquinas virtuales (KVM, VirtualBox) |
+| `/dev/loop0`, `/dev/loop1` | Loop device — un archivo montado como disco |
+
+Y las particiones añaden un número al final: `/dev/sda1`, `/dev/sda2`, `/dev/nvme0n1p1`, `/dev/nvme0n1p2`.
+
+**Ver información de un archivo de imagen:**
+```bash
+sudo fdisk -l virtual.img
+```
+```
+Disk virtual.img: 256 MiB, 268435456 bytes, 524288 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+```
+
+El archivo `virtual.img` aparece como si fuera un disco de 256 MiB. No tiene tabla de particiones porque lo formateamos directamente con ext4 sin particionarlo (fue directo al sistema de archivos).
+
+---
+
+#### Flujo completo del lab
+
+```
+1. df -h                      → Ver qué filesystems están montados y cuánto espacio libre hay
+        ↓
+2. du -sh ~                   → ¿Cuánto pesa el home completo?
+   du -h --max-depth=1 ~      → ¿Qué hay en el primer nivel?
+   du -h ~ | sort -rh | head  → ¿Cuáles son los 10 más grandes?
+        ↓
+3. dd if=/dev/zero of=virtual.img bs=1M count=256
+                              → Crear un archivo de 256MB que simulará un disco
+        ↓
+4. sudo mkfs.ext4 virtual.img → Formatear el "disco" con ext4 (crea estructura de archivos)
+        ↓
+5. sudo mkdir /mnt/virtualdisk
+   sudo mount -o loop virtual.img /mnt/virtualdisk
+                              → Crear punto de montaje y montar el disco virtual
+        ↓
+6. mount | grep virtualdisk   → Verificar que el montaje fue exitoso
+   sudo touch /mnt/virtualdisk/testfile
+   ls /mnt/virtualdisk        → Confirmar que podemos escribir en él
+        ↓
+7. sudo umount /mnt/virtualdisk
+                              → Desmontar limpiamente (vacía los buffers antes de soltar)
+        ↓
+8. sudo fdisk -l              → Ver todos los discos del sistema y sus particiones
+   sudo fdisk -l virtual.img  → Ver la imagen como si fuera un disco
+```
+
+---
+
+#### Errores frecuentes — Lab 12
+
+**`df: /dev/vdb: No such file or directory`**
+
+El lab de LabEx menciona `/dev/vdb` (un disco virtual adicional) pero en este entorno de contenedor ese disco no existe. `df` sin argumentos o con una ruta válida siempre funciona. El error es del entorno del lab, no de tu comando.
+
+**`mkfs.ext4` sin `sudo` — Permission denied**
+
+Formatear un disco requiere privilegios de root. Sin `sudo`, el comando falla con `mke2fs: No such file or directory while trying to determine filesystem size`. Siempre usa `sudo mkfs.ext4`.
+
+**Montar sin crear el punto de montaje primero**
+
+```
+mount: /mnt/virtualdisk: mount point does not exist
+```
+`mount` no crea el directorio destino — debes crearlo con `mkdir` antes. El directorio puede estar en cualquier parte, pero por convención los montajes temporales van en `/mnt/`.
+
+**`target is busy` al intentar desmontar**
+
+Tu terminal está dentro del directorio que quieres desmontar. Ejecuta `cd ~` primero para salir, y luego `sudo umount /mnt/virtualdisk`. También puede ser otro proceso — usa `lsof /mnt/virtualdisk` para identificarlo.
+
+**`du -h ~` vs `du -sh ~` — la diferencia crítica**
+
+`du -h ~` lista **todos** los subdirectorios recursivamente con su tamaño — puede producir miles de líneas en un home poblado. `du -sh ~` produce solo **una línea** con el total. Para investigar, usa `--max-depth=1` para controlar cuántos niveles bajas.
+
+**Creer que `df` muestra dónde está el espacio usado**
+
+`df` dice que el disco está lleno, pero no dice quién lo llenó. Para eso es `du`. En campo real: primero `df -h` para identificar qué filesystem está lleno, luego `du -h --max-depth=1 /punto_de_montaje | sort -rh | head -20` para descender y encontrar el culpable.
+
+---
+
+#### Ejercicio — Lab 12
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux con sudo.
+
+**Tareas:**
+
+1. Usa `df -h` para ver todos los filesystems montados. Identifica cuál tiene el mayor porcentaje de uso.
+2. Usa `du -sh /var` para ver cuánto pesa el directorio `/var`. Luego baja un nivel con `du -h --max-depth=1 /var | sort -rh | head -10`.
+3. Crea un disco virtual de 128 MB llamado `disco_prueba.img` usando `dd` con bloques de 1M.
+4. Formatea el disco virtual con `mkfs.ext4`.
+5. Crea el directorio `/mnt/prueba` y monta el disco virtual ahí.
+6. Verifica el montaje con `mount | grep prueba` y con `df -h /mnt/prueba`.
+7. Crea tres archivos dentro del disco montado: `archivo1.txt`, `archivo2.txt`, `archivo3.txt`.
+8. Desmonta el disco con `umount`.
+9. Vuelve a montar el disco y verifica que los tres archivos siguen ahí (los datos persisten en el archivo `.img`).
+10. Usa `fdisk -l disco_prueba.img` para ver la información del disco virtual.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+df -h
+
+# Paso 2
+sudo du -sh /var
+sudo du -h --max-depth=1 /var | sort -rh | head -10
+
+# Paso 3
+dd if=/dev/zero of=disco_prueba.img bs=1M count=128
+
+# Paso 4
+sudo mkfs.ext4 disco_prueba.img
+
+# Paso 5
+sudo mkdir /mnt/prueba
+sudo mount -o loop disco_prueba.img /mnt/prueba
+
+# Paso 6
+mount | grep prueba
+df -h /mnt/prueba
+
+# Paso 7
+sudo touch /mnt/prueba/archivo1.txt /mnt/prueba/archivo2.txt /mnt/prueba/archivo3.txt
+ls /mnt/prueba
+
+# Paso 8
+sudo umount /mnt/prueba
+
+# Paso 9
+sudo mount -o loop disco_prueba.img /mnt/prueba
+ls /mnt/prueba
+# Los archivos siguen ahí — viven en disco_prueba.img, no en la RAM
+
+# Paso 10
+sudo fdisk -l disco_prueba.img
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -3968,6 +4645,22 @@ tar -tzvf ~/respaldos/etc_$(date +%Y-%m-%d).tar.gz | wc -l
 | `zip -r arch.zip directorio/` | Crear archivo zip recursivo (multiplataforma) | 10 |
 | `unzip -d destino/ arch.zip` | Extraer zip en un directorio específico | 10 |
 | `du -sh directorio/` | Muestra el espacio en disco del directorio | 10 |
+| `df -h` | Muestra el uso de disco de todos los filesystems montados | 12 |
+| `df -h /ruta` | Muestra el filesystem donde vive esa ruta específica | 12 |
+| `df -T` | Muestra el tipo de filesystem (ext4, tmpfs, overlay...) | 12 |
+| `df -i` | Muestra el uso de inodes (útil cuando hay "no space" con espacio libre) | 12 |
+| `du -h --max-depth=1 ~` | Tamaños de directorios de primer nivel incluyendo ocultos | 12 |
+| `du -h dir \| sort -rh \| head -n 10` | Los 10 directorios más grandes ordenados de mayor a menor | 12 |
+| `dd if=/dev/zero of=archivo.img bs=1M count=N` | Crea un archivo de N megabytes lleno de ceros | 12 |
+| `sudo mkfs.ext4 dispositivo` | Formatea un disco o archivo con el sistema de archivos ext4 | 12 |
+| `sudo mkdir /mnt/punto` | Crea el directorio que servirá como punto de montaje | 12 |
+| `sudo mount -o loop archivo.img /mnt/punto` | Monta un archivo de imagen como si fuera un disco físico | 12 |
+| `sudo mount /dev/sdb1 /mnt/datos` | Monta una partición real en un punto de montaje | 12 |
+| `mount \| grep patron` | Filtra la lista de filesystems montados | 12 |
+| `sudo umount /mnt/punto` | Desmonta un filesystem vaciando los buffers antes de soltar | 12 |
+| `sudo fdisk -l` | Lista todos los discos del sistema y sus tablas de particiones | 12 |
+| `sudo fdisk -l archivo.img` | Muestra la información de un archivo de imagen de disco | 12 |
+| `lsof /mnt/punto` | Lista los procesos que tienen archivos abiertos en ese punto de montaje | 12 |
 
 ---
 
@@ -4149,3 +4842,40 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **`du`** | Disk Usage — mide el espacio real que ocupa en disco un archivo o directorio |
 | **`stored 0%`** | En zip: el archivo se guarda sin comprimir porque es demasiado pequeño para beneficiarse |
 | **`deflated N%`** | En zip: el archivo se comprimió un N% respecto a su tamaño original |
+| **`df`** | Disk Free — muestra el espacio usado y libre en cada filesystem montado |
+| **`du`** | Disk Usage — mide cuánto espacio en disco ocupa un directorio y su contenido |
+| **Filesystem** | La estructura que organiza los datos en un disco — define cómo se guardan y recuperan archivos |
+| **ext2** | Second Extended Filesystem (1993) — el primer filesystem estable de Linux, sin journaling |
+| **ext3** | Third Extended Filesystem (2001) — añade journaling a ext2, evita corrupción ante cortes de luz |
+| **ext4** | Fourth Extended Filesystem (2008) — el estándar actual en Linux, soporta archivos hasta 16TB, usa extents |
+| **Journaling** | Técnica de los filesystems modernos: escribe en una bitácora qué va a hacer antes de hacerlo, garantizando consistencia ante fallos |
+| **Journal** | La bitácora interna del filesystem donde se registran las operaciones antes de ejecutarlas |
+| **Extent** | Rango contiguo de bloques descrito con un solo registro — en ext4 reemplaza la lista bloque-a-bloque de ext3 |
+| **Inode** | Ficha técnica de un archivo: guarda dueño, permisos, fechas y bloques del disco, pero NO el nombre |
+| **Superbloque** | Estructura crítica del filesystem que contiene su estado global: tamaño, inodes libres, bloques libres |
+| **`lost+found`** | Directorio especial en ext4 donde `fsck` deposita archivos rescatados cuyo nombre se perdió por corrupción |
+| **`fsck`** | File System Check — herramienta de reparación de filesystems, equivalente al "chkdsk" de Windows |
+| **Montaje** | El proceso de conectar un filesystem a un punto del árbol de directorios para hacerlo accesible |
+| **Punto de montaje** | El directorio donde "aterriza" el contenido de un disco al montarlo |
+| **`/mnt`** | Convención para montajes temporales — es el lugar habitual para montar discos manualmente |
+| **`/media`** | Convención para dispositivos externos (USB, DVD) — muchos sistemas montan aquí automáticamente |
+| **`/etc/fstab`** | Archivo de configuración que define qué filesystems se montan automáticamente al arrancar |
+| **UUID** | Universally Unique Identifier — identificador único del filesystem, más confiable que el nombre del dispositivo |
+| **`dd`** | Disk Dump — copia datos bloque a bloque entre dispositivos o archivos, sin ninguna capa de abstracción |
+| **`/dev/zero`** | Dispositivo especial que produce ceros indefinidamente — usado para crear archivos de tamaño fijo |
+| **Loop device** | Dispositivo virtual (`/dev/loop0`) que hace que un archivo se comporte como un disco físico |
+| **`-o loop`** | Opción de `mount` que crea automáticamente un loop device para montar un archivo de imagen |
+| **`mkfs.ext4`** | Make Filesystem — formatea un dispositivo o archivo con el sistema de archivos ext4 |
+| **Partición** | División lógica de un disco físico — cada partición tiene su propio filesystem y se monta independientemente |
+| **Tabla de particiones** | Estructura al inicio del disco que define cuántas particiones hay y sus posiciones |
+| **`fdisk`** | Herramienta para ver y modificar tablas de particiones en discos de estilo MBR |
+| **MBR** | Master Boot Record — esquema de particionado clásico, soporta hasta 4 particiones primarias y discos de hasta 2TB |
+| **GPT** | GUID Partition Table — esquema moderno que reemplaza a MBR, soporta más particiones y discos mayores a 2TB |
+| **`/dev/sda`** | Primer disco SATA/SAS del sistema — `b`, `c`... para discos adicionales |
+| **`/dev/nvme0n1`** | Primer disco NVMe — los SSD modernos de alta velocidad conectados directamente a PCIe |
+| **`/dev/vda`** | Disco virtual en máquinas virtuales (KVM, VirtualBox, cloud) |
+| **Swap** | Partición o archivo usado como extensión de la RAM — el sistema mueve páginas de memoria aquí cuando la RAM se llena |
+| **`lsof`** | List Open Files — lista todos los archivos que los procesos tienen abiertos actualmente |
+| **Buffer de escritura** | Área en RAM donde el kernel acumula escrituras antes de enviarlas al disco — mejora rendimiento |
+| **`sort -h`** | Flag de sort para ordenar correctamente valores con sufijos humanos (K, M, G) |
+| **`sort -r`** | Flag de sort para ordenar en orden inverso (mayor a menor) |
