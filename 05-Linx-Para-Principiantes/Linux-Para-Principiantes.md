@@ -21,6 +21,7 @@
   - [Lab 08 — Variables de Entorno](#lab-08--variables-de-entorno)
   - [Lab 09 — Desafío: Variable de Entorno Permanente](#lab-09--desafío-variable-de-entorno-permanente)
   - [Lab 10 — Empaquetar y Comprimir Archivos](#lab-10--empaquetar-y-comprimir-archivos)
+  - [Lab 11 — Desafío: Respaldo de Logs del Sistema](#lab-11--desafío-respaldo-de-logs-del-sistema)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -3651,6 +3652,220 @@ unzip -d desde_zip backup.zip
 # Paso 8
 du -sh practica-compress/
 du -sh backup.tar.gz backup_v2.tar.gz backup.zip
+```
+
+</details>
+
+---
+
+### Lab 11 — Desafío: Respaldo de Logs del Sistema
+
+**Escenario:** TechCorp necesita respaldos diarios de los logs del servidor para cumplimiento normativo. Cada respaldo debe tener en el nombre la fecha en que fue creado para poder identificarlo sin abrirlo. El reto es hacer todo en un solo comando.
+
+> Este desafío conecta tres habilidades de labs anteriores en un comando de producción real: `tar` (Lab 10), `date` con formato (Lab 01/08), y sustitución de comandos con `$()` (Lab 08). Cuando estas tres piezas se combinan, el resultado es una línea que pueden usar administradores reales todos los días.
+
+---
+
+#### El concepto clave: sustitución de comandos `$()`
+
+Antes de ver el comando completo, hay que entender `$()`:
+
+```bash
+$(comando)
+```
+
+**Qué hace:** Ejecuta el comando que está dentro de los paréntesis y reemplaza `$()` con su resultado — en el mismo momento en que se construye el comando exterior.
+
+**Ejemplos sencillos:**
+```bash
+echo "Hoy es $(date)"
+# Resultado: Hoy es Mon Apr 14 12:00:00 CST 2026
+
+echo "El usuario es $(whoami)"
+# Resultado: El usuario es labex
+
+mkdir backup_$(date +%Y-%m-%d)
+# Crea el directorio: backup_2026-04-14
+```
+
+> `$()` es la forma moderna de lo que antes se hacía con backticks `` `comando` ``. Son equivalentes, pero `$()` es más legible y permite anidamiento.
+
+---
+
+#### El comando completo del lab — desglosado
+
+```bash
+sudo tar -czvf /home/labex/project/$(date +%Y-%m-%d).tar.gz /var/log
+```
+
+Desglosado pieza por pieza:
+
+| Parte | Qué hace |
+|-------|---------|
+| `sudo` | Se necesita para leer archivos de `/var/log` que pertenecen a root |
+| `tar` | La herramienta de empaquetado |
+| `-c` | Crear un archivo nuevo |
+| `-z` | Comprimir con gzip |
+| `-v` | Verbose — muestra cada archivo que agrega |
+| `-f` | El siguiente argumento es el nombre del archivo de salida |
+| `/home/labex/project/` | El directorio donde se guardará el respaldo |
+| `$(date +%Y-%m-%d)` | Se evalúa como la fecha actual: `2026-04-14` |
+| `.tar.gz` | Extensión del archivo resultante |
+| `/var/log` | El directorio de logs del sistema que se respalda |
+
+**El nombre del archivo resultante:**
+```
+/home/labex/project/2026-04-14.tar.gz
+```
+
+Cada día que ejecutes el comando, `$(date +%Y-%m-%d)` genera una fecha diferente — nunca sobreescribirás el respaldo anterior.
+
+---
+
+#### El mensaje "Removing leading `/` from member names"
+
+```
+tar: Removing leading `/' from member names
+```
+
+Este mensaje aparece siempre que pasas una **ruta absoluta** a `tar`. Es una advertencia informativa, no un error — el respaldo se crea correctamente.
+
+**Por qué existe esta advertencia:**
+
+Cuando `tar` guarda `/var/log/nginx/access.log` con la barra inicial, al extraerlo intentaría colocarlo exactamente en `/var/log/nginx/access.log` — sobreescribiendo el archivo del sistema. Para protegerte, `tar` elimina el `/` inicial y guarda la ruta como `var/log/nginx/access.log`. Al extraer, el archivo queda relativo al directorio actual.
+
+```bash
+# Lo que guarda tar internamente (sin la / inicial):
+var/log/alternatives.log
+var/log/apt/history.log
+var/log/nginx/access.log
+```
+
+**Si quisieras suprimir el mensaje** (en scripts automáticos donde no quieres ruido):
+```bash
+sudo tar -czvf /home/labex/project/$(date +%Y-%m-%d).tar.gz /var/log 2>/dev/null
+```
+
+---
+
+#### Lo que contiene `/var/log`
+
+La salida del lab reveló qué hay en el directorio de logs:
+
+| Log | Qué registra |
+|-----|-------------|
+| `/var/log/apt/history.log` | Instalaciones y actualizaciones de paquetes |
+| `/var/log/dpkg.log` | Operaciones de dpkg (instalador de .deb) |
+| `/var/log/bootstrap.log` | Log del proceso de arranque del sistema |
+| `/var/log/btmp` | Intentos fallidos de inicio de sesión |
+| `/var/log/wtmp` | Historial de inicios y cierres de sesión |
+| `/var/log/faillog` | Fallos de autenticación por usuario |
+| `/var/log/nginx/access.log` | Peticiones HTTP recibidas por Nginx |
+| `/var/log/nginx/error.log` | Errores del servidor web Nginx |
+| `/var/log/apache2/` | Logs del servidor web Apache |
+| `/var/log/supervisor/` | Logs del gestor de procesos supervisor |
+
+> Guardar los logs con fecha permite reconstruir qué ocurrió en el sistema en una fecha específica. Si el martes ocurre un incidente de seguridad, abres el respaldo del lunes para ver el estado previo.
+
+---
+
+#### Verificar el respaldo
+
+```bash
+ls /home/labex/project/
+```
+```
+2026-04-14.tar.gz
+```
+
+**Verificaciones adicionales recomendadas:**
+
+```bash
+# Ver que el archivo existe y su tamaño
+ls -lh /home/labex/project/2026-04-14.tar.gz
+
+# Listar el contenido sin extraer (primeras 20 líneas)
+tar -tzvf /home/labex/project/2026-04-14.tar.gz | head -20
+
+# Contar cuántos archivos tiene el respaldo
+tar -tzvf /home/labex/project/2026-04-14.tar.gz | wc -l
+```
+
+---
+
+#### Convertirlo en tarea automática diaria
+
+El siguiente paso natural es automatizarlo con cron (visto en el Lab 09 del manual de Administración de Sistemas):
+
+```bash
+crontab -e
+```
+
+Agregar esta línea para ejecutarlo todos los días a las 2 AM:
+```
+0 2 * * * sudo tar -czvf /home/labex/project/$(date +\%Y-\%m-\%d).tar.gz /var/log 2>/dev/null
+```
+
+> Recuerda que dentro de `crontab`, los `%` deben escaparse como `\%` — de lo contrario cron los interpreta como separadores de línea.
+
+---
+
+#### Errores frecuentes — Lab 11
+
+**`tar: /var/log: Cannot open: Permission denied`**
+
+`/var/log` pertenece a root — sin `sudo`, `tar` no puede leer muchos de sus archivos. Siempre usa `sudo` cuando respaldes directorios del sistema.
+
+**El archivo de respaldo queda dentro del directorio que se está respaldando**
+
+Si guardas el respaldo dentro de `/var/log/`:
+```bash
+sudo tar -czvf /var/log/$(date +%Y-%m-%d).tar.gz /var/log
+```
+El tar intentará incluirse a sí mismo mientras se está creando. `tar` lo detecta e imprime un warning, pero el resultado puede ser inconsistente. Siempre guarda el respaldo **fuera** del directorio que estás respaldando.
+
+**`$(date +%Y-%m-%d)` no expande la fecha en el nombre del archivo**
+
+Si usaste comillas simples: `'$(date +%Y-%m-%d).tar.gz'`, la sustitución no ocurre. Las comillas simples bloquean toda expansión. Usa comillas dobles o sin comillas cuando quieras que `$()` se evalúe.
+
+---
+
+#### Ejercicio — Lab 11
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux con sudo.
+
+**Tareas:**
+
+1. Crea el directorio `~/respaldos/` donde se guardarán los respaldos.
+2. Usa un solo comando para crear un respaldo comprimido de `/etc/` con el nombre `etc_YYYY-MM-DD.tar.gz` dentro de `~/respaldos/`.
+3. Verifica con `ls -lh ~/respaldos/` que el archivo fue creado.
+4. Lista las primeras 10 entradas del respaldo con `tar -tzvf ... | head -10`.
+5. Usa `tar -tzvf ... | wc -l` para saber cuántos archivos tiene el respaldo.
+6. (Opcional) Agrega este comando a tu crontab para que se ejecute todos los días a las 3 AM.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+mkdir -p ~/respaldos
+
+# Paso 2
+sudo tar -czvf ~/respaldos/etc_$(date +%Y-%m-%d).tar.gz /etc 2>/dev/null
+
+# Paso 3
+ls -lh ~/respaldos/
+
+# Paso 4
+tar -tzvf ~/respaldos/etc_$(date +%Y-%m-%d).tar.gz | head -10
+
+# Paso 5
+tar -tzvf ~/respaldos/etc_$(date +%Y-%m-%d).tar.gz | wc -l
+
+# Paso 6 — crontab
+# crontab -e
+# Agregar:
+# 0 3 * * * sudo tar -czvf ~/respaldos/etc_$(date +\%Y-\%m-\%d).tar.gz /etc 2>/dev/null
 ```
 
 </details>
