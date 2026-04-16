@@ -24,6 +24,7 @@
   - [Lab 11 — Desafío: Respaldo de Logs del Sistema](#lab-11--desafío-respaldo-de-logs-del-sistema)
   - [Lab 12 — Discos, Particiones y Sistemas de Archivos](#lab-12--discos-particiones-y-sistemas-de-archivos)
   - [Lab 13 — Tuberías, Operadores Condicionales y Procesamiento de Texto](#lab-13--tuberías-operadores-condicionales-y-procesamiento-de-texto)
+  - [Lab 14 — Desafío: Procesar Datos de Sensores](#lab-14--desafío-procesar-datos-de-sensores)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -5142,6 +5143,325 @@ cut -d: -f6 /etc/passwd | sort | head -5
 
 ---
 
+### Lab 14 — Desafío: Procesar Datos de Sensores
+
+**Escenario:** El sistema de sensores de una nave espacial está capturando detecciones de naves enemigas en un archivo de texto crudo (`sensor_data.txt`). El problema: el archivo tiene ruido — hay otros tipos de eventos mezclados, y hay detecciones duplicadas registradas dos veces con el mismo timestamp y sector. El objetivo es extraer solo las detecciones de naves enemigas, ordenarlas cronológicamente y eliminar los duplicados exactos — todo en un solo comando y guardar el resultado limpio en otro archivo.
+
+> Este desafío combina tres herramientas del Lab 13 en una sola línea de producción: `grep` para filtrar, `sort` para ordenar, `uniq` para deduplicar. La parte que confunde es `-k1,1` en `sort` — y tiene una lógica que vale la pena entender bien porque es una de las flags más comunes en procesamiento de datos reales.
+
+---
+
+#### El comando completo — autopsia
+
+```bash
+grep "Detected enemy vessel" /home/labex/project/sensor_data.txt | sort -k1,1 | uniq > /home/labex/project/processed_sensor_data.txt
+```
+
+Desglosado pieza por pieza:
+
+| Pieza | Qué hace |
+|-------|---------|
+| `grep "Detected enemy vessel"` | Filtra solo las líneas que contienen esa frase exacta |
+| `/home/labex/project/sensor_data.txt` | El archivo de entrada con todos los eventos crudos |
+| `\|` | Pipe — la salida de grep se convierte en entrada de sort |
+| `sort -k1,1` | Ordena las líneas usando solo el primer campo como clave |
+| `\|` | Pipe — la salida de sort se convierte en entrada de uniq |
+| `uniq` | Elimina líneas consecutivas idénticas (los duplicados exactos) |
+| `>` | Redirige la salida a un archivo (crea o sobreescribe) |
+| `/home/labex/project/processed_sensor_data.txt` | El archivo de salida con los datos limpios |
+
+---
+
+#### La parte que confunde: `sort -k1,1`
+
+Este es el núcleo del desafío. Para entenderlo bien hay que entender cómo `sort` define los "campos".
+
+**Cómo `sort` divide una línea en campos:**
+
+Por defecto, `sort` usa espacios en blanco como separador de campos. Cada palabra separada por espacios es un campo numerado desde 1.
+
+Una línea del archivo:
+```
+0001h - Detected enemy vessel at sector O4
+```
+
+Los campos son:
+```
+Campo 1: 0001h
+Campo 2: -
+Campo 3: Detected
+Campo 4: enemy
+Campo 5: vessel
+Campo 6: at
+Campo 7: sector
+Campo 8: O4
+```
+
+**Qué hace `-k` en sort:**
+
+`-k` define la **clave de ordenamiento** — qué parte de la línea se usa para comparar y ordenar. Su sintaxis es:
+
+```
+-k INICIO,FIN
+```
+
+| Forma | Qué significa | Comportamiento |
+|-------|--------------|---------------|
+| `sort -k1` | "Empieza en el campo 1 y sigue hasta el **final de la línea**" | Usa todo desde el campo 1 hasta el final como clave |
+| `sort -k1,1` | "Empieza en el campo 1 y **termina en el campo 1**" | Usa solo el campo 1 como clave — nada más |
+| `sort -k3,5` | "Empieza en el campo 3 y termina en el campo 5" | Usa los campos 3, 4 y 5 como clave |
+
+**¿Por qué importa la diferencia entre `-k1` y `-k1,1`?**
+
+Imagina dos líneas con el mismo timestamp:
+```
+0002h - Detected enemy vessel at sector F8
+0002h - Detected enemy vessel at sector Y5
+```
+
+Con `sort -k1` (sin límite de campo):
+- La clave de ordenamiento es "todo desde el campo 1 hasta el final": `0002h - Detected enemy vessel at sector F8`
+- Compara toda la línea como clave — funciona, pero puede producir un orden diferente al esperado
+
+Con `sort -k1,1`:
+- La clave de ordenamiento es exactamente el campo 1: `0002h`
+- Cuando dos líneas tienen el mismo campo 1, el orden entre ellas no se determina por la clave — quedan en el orden en que llegaron (orden estable)
+
+**En este lab, `-k1,1` es la elección correcta porque:**
+- Solo quieres ordenar por el timestamp (`0001h`, `0002h`...)
+- Cuando dos detecciones tienen el mismo timestamp (como `0002h` con sectores F8 y Y5), no quieres que el sector cambie el ordenamiento — ambas están en el mismo momento y deben aparecer juntas para que `uniq` pueda hacer su trabajo
+- Si usaras `sort -k1` o `sort` sin flag, ordenaría por toda la línea y podrías separar detecciones del mismo timestamp por la posición del sector en el alfabeto
+
+**Ejemplo visual:**
+
+Con `sort` (sin -k, ordena toda la línea):
+```
+0002h - Detected enemy vessel at sector F8    ← F antes de Y
+0002h - Detected enemy vessel at sector Y5
+```
+
+Con `sort -k1,1` (solo por timestamp):
+```
+0002h - Detected enemy vessel at sector F8    ← también F antes de Y, pero por razón diferente
+0002h - Detected enemy vessel at sector Y5
+```
+
+En este caso el resultado es el mismo — pero si hubiera una línea como `0001h - Detected enemy vessel at sector Z1`, con `sort` completo podría terminar antes de `0002h - Detected enemy vessel at sector A1` aunque sea un timestamp menor, porque `Z` > `A`. Con `-k1,1` solo compara los timestamps y el orden cronológico es siempre correcto.
+
+**Casos donde `-k` cambia todo:**
+
+```bash
+# Archivo de ejemplo: nombre y edad
+Alice 30
+Bob 25
+Carol 30
+
+sort -k2,2n    # Ordena por campo 2 (edad) numéricamente
+```
+```
+Bob 25
+Alice 30
+Carol 30
+```
+
+Sin `-k`, ordenaría: `Alice 30` → `Bob 25` → `Carol 30` (alfabético por nombre).
+
+---
+
+#### Por qué el orden de los tres comandos importa
+
+El pipeline es `grep | sort | uniq`. ¿Por qué ese orden y no otro?
+
+**¿Por qué `grep` va primero?**
+
+`grep` reduce el volumen de datos al principio. Si `sensor_data.txt` tiene 10.000 líneas y solo 500 son detecciones de naves enemigas, `sort` y `uniq` solo trabajan con esas 500 líneas en vez de con las 10.000. Filtrar antes de procesar es siempre más eficiente.
+
+Si pusieras `sort` primero:
+```bash
+sort -k1,1 sensor_data.txt | grep "Detected enemy vessel" | uniq
+```
+Funcionaría, pero `sort` haría trabajo extra ordenando las 10.000 líneas antes de que `grep` las reduzca.
+
+**¿Por qué `sort` va antes de `uniq`?**
+
+`uniq` solo elimina duplicados **consecutivos**. Si el archivo contiene:
+```
+0001h - Detected enemy vessel at sector O4   ← primera aparición
+0005h - Detected enemy vessel at sector D1
+0001h - Detected enemy vessel at sector O4   ← duplicado, pero NO es consecutivo
+```
+
+`uniq` sin `sort` dejaría las tres líneas — no detecta que la primera y tercera son iguales porque no están juntas.
+
+Con `sort -k1,1` primero:
+```
+0001h - Detected enemy vessel at sector O4
+0001h - Detected enemy vessel at sector O4   ← ahora sí están juntas
+0005h - Detected enemy vessel at sector D1
+```
+
+Ahora `uniq` elimina el duplicado perfectamente.
+
+**El orden correcto siempre es: filtrar → ordenar → deduplicar.**
+
+---
+
+#### La redirección `>` — guardar en archivo
+
+```bash
+... | uniq > /home/labex/project/processed_sensor_data.txt
+```
+
+`>` redirige la salida estándar a un archivo. Si el archivo no existe, lo crea. Si ya existe, lo **sobreescribe completamente** — el contenido anterior se pierde.
+
+| Operador | Comportamiento | Cuándo usar |
+|----------|---------------|------------|
+| `>` | Crea el archivo o sobreescribe si existe | Cuando quieres un resultado limpio cada vez |
+| `>>` | Agrega al final del archivo si existe; lo crea si no | Cuando quieres acumular resultados (logs, respaldos) |
+
+En este lab se usa `>` porque cada vez que procesas los sensores quieres un archivo limpio con el resultado actual, no una acumulación de ejecuciones anteriores.
+
+**Verificar el resultado:**
+```bash
+cat processed_sensor_data.txt
+```
+
+Muestra el contenido del archivo resultante — las detecciones filtradas, ordenadas y deduplicadas.
+
+---
+
+#### Errores que probablemente ocurrieron
+
+**`sort -k1` sin `,1`**
+
+```bash
+grep "Detected enemy vessel" sensor_data.txt | sort -k1 | uniq > resultado.txt
+```
+
+Esto funciona casi igual para este archivo específico — pero no es semánticamente correcto. `sort -k1` ordena desde el campo 1 hasta el final de la línea, lo que puede dar resultados inesperados cuando los timestamps son iguales. La forma precisa es siempre `-k1,1`.
+
+**`uniq` antes de `sort`**
+
+```bash
+grep "Detected enemy vessel" sensor_data.txt | uniq | sort -k1,1 > resultado.txt
+```
+
+Los duplicados no están juntos en el archivo original (el sensor registra eventos en orden de llegada, no agrupados). `uniq` no elimina nada porque los duplicados no son consecutivos. Después de `sort`, los duplicados llegan ordenados y ya no pueden ser eliminados — `sort` solo los pone juntos, `uniq` necesita operar después.
+
+**`>>` en vez de `>`**
+
+```bash
+grep "Detected enemy vessel" sensor_data.txt | sort -k1,1 | uniq >> resultado.txt
+```
+
+Cada vez que ejecutas el comando, agrega el resultado al archivo. Si lo ejecutas tres veces, el archivo tiene tres copias de los datos. Para un archivo procesado que debe estar limpio, siempre `>`.
+
+**`grep` sin comillas en el patrón**
+
+```bash
+grep Detected enemy vessel sensor_data.txt
+```
+
+Sin comillas, `grep` interpreta `Detected` como el patrón y `enemy`, `vessel`, `sensor_data.txt` como archivos a buscar — que no existen. El patrón con espacios siempre va entre comillas dobles.
+
+**Rutas relativas cuando se está en el directorio incorrecto**
+
+```bash
+grep "Detected enemy vessel" sensor_data.txt | sort -k1,1 | uniq > processed_sensor_data.txt
+```
+
+Si estás en `/home/labex/project/` esto funciona. Pero si estás en `/home/labex/` o en cualquier otro directorio, `sensor_data.txt` no se encuentra. El lab usa rutas absolutas (`/home/labex/project/...`) para garantizar que funcione sin importar dónde esté el shell.
+
+---
+
+#### Flujo completo visualizado
+
+```
+sensor_data.txt (datos crudos, todos los eventos)
+        ↓
+grep "Detected enemy vessel"
+        → filtra: solo líneas con detecciones de naves enemigas
+        → descarta: alarmas, lecturas de temperatura, otros eventos
+        ↓
+sort -k1,1
+        → ordena cronológicamente por el timestamp (campo 1: 0001h, 0002h...)
+        → si dos detecciones tienen el mismo timestamp, las deja juntas
+        → los duplicados exactos ahora son líneas consecutivas
+        ↓
+uniq
+        → elimina las líneas consecutivas idénticas
+        → mantiene una sola copia de cada detección única
+        ↓
+> processed_sensor_data.txt (resultado limpio)
+```
+
+---
+
+#### La clave mental para recordar `-k INICIO,FIN`
+
+> "Empieza a comparar en el campo INICIO y **para** en el campo FIN."
+>
+> `-k1,1` = "empieza en campo 1, para en campo 1" → usa solo el campo 1.
+> `-k1` = "empieza en campo 1, no pares" → usa el campo 1 y todo lo que le sigue.
+>
+> Si solo quieres un campo exacto, siempre escribe el mismo número dos veces: `-k3,3`, `-k2,2`, `-k7,7`.
+
+---
+
+#### Ejercicio — Lab 14
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Preparación:**
+```bash
+cat << 'EOF' > ~/sistema_eventos.log
+1001 ERROR disco lleno en /var
+1002 INFO backup completado
+1001 ERROR disco lleno en /var
+1003 WARNING temperatura alta en CPU
+1004 INFO usuario root inició sesión
+1003 WARNING temperatura alta en CPU
+1002 INFO backup completado
+1005 ERROR conexión rechazada en puerto 22
+1003 WARNING temperatura alta en CPU
+1006 INFO usuario labex inició sesión
+EOF
+```
+
+**Tareas:**
+
+1. Usa `grep "ERROR" ~/sistema_eventos.log` para ver solo los errores.
+2. Conecta con `| sort -k1,1` para ordenarlos por código de evento.
+3. Agrega `| uniq` para eliminar duplicados.
+4. Redirige el resultado a `~/errores_unicos.log` con `>`.
+5. Usa `cat ~/errores_unicos.log` para verificar el resultado.
+6. **Desafío extra:** Cuenta cuántos eventos únicos de WARNING hay con `grep "WARNING" ~/sistema_eventos.log | sort -k1,1 | uniq | wc -l`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Pasos 1-4 en un solo comando
+grep "ERROR" ~/sistema_eventos.log | sort -k1,1 | uniq > ~/errores_unicos.log
+
+# Paso 5
+cat ~/errores_unicos.log
+
+# Paso 6
+grep "WARNING" ~/sistema_eventos.log | sort -k1,1 | uniq | wc -l
+```
+
+**Resultado esperado de errores_unicos.log:**
+```
+1001 ERROR disco lleno en /var
+1005 ERROR conexión rechazada en puerto 22
+```
+Dos errores únicos — `1001` apareció dos veces en el original, `uniq` lo redujo a uno.
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -5277,6 +5597,9 @@ cut -d: -f6 /etc/passwd | sort | head -5
 | `sort \| uniq -c` | Cuenta cuántas veces aparece cada línea | 13 |
 | `sort \| uniq -d` | Muestra solo las líneas que tienen al menos un duplicado | 13 |
 | `sort \| uniq -u` | Muestra solo las líneas completamente únicas | 13 |
+| `sort -k1,1` | Ordena usando solo el campo 1 como clave (inicio,fin del campo) | 14 |
+| `sort -k2,2n` | Ordena numéricamente por el campo 2 exactamente | 14 |
+| `grep "patron" archivo \| sort -k1,1 \| uniq > resultado` | Pipeline completo: filtrar → ordenar → deduplicar → guardar | 14 |
 
 ---
 
@@ -5517,3 +5840,11 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **Expresión regular** | Patrón de texto con sintaxis especial para describir conjuntos de cadenas — base de `grep`, `sed`, `awk` |
 | **Pipeline** | Cadena de comandos conectados por tuberías donde cada uno procesa la salida del anterior |
 | **`cowsay`** | Herramienta de entretenimiento que muestra texto con una vaca ASCII — útil para demos y banners en scripts |
+| **`-k INICIO,FIN` en sort** | Define la clave de ordenamiento: compara desde el campo INICIO hasta el campo FIN — si INICIO=FIN, usa exactamente ese campo |
+| **`-k1,1`** | Ordena usando solo el primer campo (campo 1 a campo 1) — el patrón más común para ordenar por un identificador |
+| **`-k1`** | Ordena desde el campo 1 hasta el final de la línea — más amplio que `-k1,1`, puede dar orden inesperado |
+| **Campo en sort** | Segmento de texto separado por espacios (por defecto) o por el delimitador de `-t` — numerado desde 1 |
+| **`sort -t`** | Define el delimitador de campos para sort, igual que `-d` en cut — ej. `sort -t: -k3,3n` ordena `/etc/passwd` por UID |
+| **Clave de ordenamiento** | El fragmento de cada línea que `sort` compara para decidir el orden — definido por `-k` |
+| **Deduplicar** | Eliminar entradas duplicadas de un conjunto de datos — en Linux se hace con `sort | uniq` |
+| **Duplicados consecutivos** | Líneas idénticas que están una seguida de la otra — lo único que `uniq` puede eliminar |
