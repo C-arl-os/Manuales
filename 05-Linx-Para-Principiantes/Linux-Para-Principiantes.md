@@ -23,6 +23,7 @@
   - [Lab 10 — Empaquetar y Comprimir Archivos](#lab-10--empaquetar-y-comprimir-archivos)
   - [Lab 11 — Desafío: Respaldo de Logs del Sistema](#lab-11--desafío-respaldo-de-logs-del-sistema)
   - [Lab 12 — Discos, Particiones y Sistemas de Archivos](#lab-12--discos-particiones-y-sistemas-de-archivos)
+  - [Lab 13 — Tuberías, Operadores Condicionales y Procesamiento de Texto](#lab-13--tuberías-operadores-condicionales-y-procesamiento-de-texto)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -4549,6 +4550,598 @@ sudo fdisk -l disco_prueba.img
 
 ---
 
+### Lab 13 — Tuberías, Operadores Condicionales y Procesamiento de Texto
+
+**Escenario:** El equipo de operaciones necesita analizar archivos de configuración del sistema: ¿cuántos directorios tiene `/etc`? ¿Cuántos usuarios usan cada shell? ¿Cuántas líneas de su configuración contienen la variable `PATH`? No existe ningún comando que responda estas preguntas directamente — la respuesta está en combinar herramientas simples con tuberías y operadores lógicos.
+
+> Este lab enseña la filosofía central de Unix: **cada herramienta hace una cosa, pero al combinarlas formas un procesador de datos arbitrariamente poderoso**. Un sysadmin que domina tuberías puede responder en segundos preguntas que tomarían horas programar desde cero.
+
+---
+
+#### Los operadores que conectan comandos: `&&`, `||`, y `|`
+
+Antes de ver los comandos de texto, hay que entender cómo Linux encadena comandos. Hay tres operadores, y tienen lógicas completamente diferentes.
+
+---
+
+**`&&` — AND lógico: "si el primero funciona, ejecuta el segundo"**
+
+```bash
+comando1 && comando2
+```
+
+El shell ejecuta `comando1`. Si termina con éxito (código de salida 0), ejecuta `comando2`. Si falla (código distinto de 0), el segundo nunca se ejecuta.
+
+**Ejemplos del lab:**
+```bash
+date && ls ~
+```
+```
+Thu Apr 16 11:00:35 AM CST 2026
+Code  Desktop  golang  project
+```
+
+`date` siempre tiene éxito → `ls ~` se ejecuta. El resultado es ambos comandos en secuencia.
+
+```bash
+sudo apt-get update && sudo apt-get install -y cowsay
+```
+
+Este es el patrón más común con `&&` en campo real: primero actualiza la lista de paquetes; si eso funciona, instala. Si `apt-get update` falla (sin internet, repositorio caído), la instalación no se intenta — evita instalar desde una lista desactualizada.
+
+**En campo real, `&&` se usa para:**
+- Compilar y ejecutar solo si la compilación fue exitosa: `make && ./programa`
+- Respaldar antes de modificar: `cp config.conf config.conf.bak && nano config.conf`
+- Verificar antes de borrar: `ls archivos_viejos/ && rm -r archivos_viejos/`
+- Encadenar pasos de un proceso que dependen del anterior: `git add . && git commit -m "mensaje" && git push`
+
+---
+
+**`||` — OR lógico: "si el primero falla, ejecuta el segundo"**
+
+```bash
+comando1 || comando2
+```
+
+El shell ejecuta `comando1`. Si tiene éxito, `comando2` no se ejecuta. Si falla, entonces sí ejecuta `comando2`. Es el "plan B".
+
+**Ejemplo del lab:**
+```bash
+which cowsay && cowsay "Hello, LabEx" || echo "cowsay is not installed"
+```
+
+Este comando hace tres cosas en cadena:
+1. `which cowsay` — busca si `cowsay` está instalado
+2. Si lo encontró (`&&`), ejecuta `cowsay "Hello, LabEx"`
+3. Si `which cowsay` falló (`||`), imprime el mensaje alternativo
+
+**Primera ejecución** (antes de instalar cowsay):
+```
+cowsay not found
+cowsay is not installed
+```
+
+**Después de instalar cowsay:**
+```
+/usr/games/cowsay
+ ______________
+< Hello, LabEx >
+ --------------
+        \   ^__^
+         \  (oo)\_______
+            (__)\       )\/\
+                ||----w |
+                ||     ||
+```
+
+`which cowsay` devuelve la ruta y tiene éxito → `cowsay` se ejecuta → el `||` no se activa.
+
+**En campo real, `||` se usa para:**
+- Valores por defecto: `echo $VAR || echo "VAR no está definida"`
+- Crear directorio si no existe: `mkdir /tmp/datos 2>/dev/null || true`
+- Mensajes de error legibles en scripts: `comando_importante || { echo "Error crítico"; exit 1; }`
+
+**La tabla completa de cómo interactúan `&&` y `||`:**
+
+| `comando1` resulta en | `comando1 && comando2` | `comando1 \|\| comando2` |
+|----------------------|----------------------|------------------------|
+| Éxito (código 0) | Ejecuta `comando2` | No ejecuta `comando2` |
+| Fallo (código ≠ 0) | No ejecuta `comando2` | Ejecuta `comando2` |
+
+> **Código de salida (exit code):** Cada programa en Linux, al terminar, devuelve un número al shell. `0` significa éxito. Cualquier otro número significa que algo salió mal (1 = error genérico, 2 = uso incorrecto, 127 = comando no encontrado...). `&&` y `||` toman decisiones basándose en ese número. Puedes ver el código del último comando con `echo $?`.
+
+---
+
+**`|` — Pipe: "la salida de uno es la entrada del siguiente"**
+
+```bash
+comando1 | comando2 | comando3
+```
+
+La tubería conecta la **salida estándar** (stdout) de un comando con la **entrada estándar** (stdin) del siguiente. Los tres comandos se ejecutan en paralelo — no es "uno termina y pasa datos al otro", sino que todos corren al mismo tiempo y los datos fluyen conforme se producen.
+
+**Ejemplo del lab:**
+```bash
+ls -l /etc | grep '^d' | wc -l
+```
+```
+103
+```
+
+Desglose paso a paso:
+
+```
+ls -l /etc           → lista todo lo que hay en /etc con detalles
+      |
+grep '^d'            → filtra solo las líneas que empiezan con 'd' (directorios)
+      |
+wc -l                → cuenta cuántas líneas quedaron
+```
+
+Resultado: hay 103 directorios en `/etc`. Ningún comando individual puede decirte eso — es la combinación.
+
+**La diferencia fundamental entre `|`, `&&` y `||`:**
+
+| Operador | Conecta | Cuándo activa el segundo |
+|----------|---------|------------------------|
+| `\|` | stdout → stdin | Siempre — sin importar si el primero falla |
+| `&&` | comandos | Solo si el primero tiene éxito |
+| `\|\|` | comandos | Solo si el primero falla |
+
+---
+
+#### `cut` — Extraer campos de texto estructurado
+
+**Sintaxis:**
+```bash
+cut -d DELIMITADOR -f CAMPOS archivo
+cut -d: -f1 /etc/passwd          # solo el primer campo (nombre de usuario)
+cut -d: -f1,6 /etc/passwd        # campos 1 y 6 (nombre y directorio home)
+cut -d: -f3-5 /etc/passwd        # campos del 3 al 5
+cut -c 1-10 archivo              # caracteres del 1 al 10 de cada línea
+```
+
+**Qué hace:** Extrae columnas específicas de texto estructurado. Piénsalo como seleccionar columnas de una tabla de Excel, pero para texto plano. Ideal para archivos con un separador consistente (`:`, `,`, `\t`).
+
+**Ejemplo del lab:**
+```bash
+cut -d: -f1,6 /etc/passwd | head -n 5
+```
+```
+root:/root
+daemon:/usr/sbin
+bin:/bin
+sys:/dev
+sync:/bin
+```
+
+**El archivo `/etc/passwd` — estructura:**
+
+Cada línea de `/etc/passwd` tiene 7 campos separados por `:`:
+```
+nombre:contraseña:UID:GID:comentario:home:shell
+root   :x        :0  :0  :root      :/root:/bin/bash
+```
+
+| Campo | Número | Contenido |
+|-------|--------|---------|
+| `root` | 1 | Nombre del usuario |
+| `x` | 2 | Contraseña (siempre `x` — la real está en `/etc/shadow`) |
+| `0` | 3 | UID (User ID) |
+| `0` | 4 | GID (Group ID) |
+| `root` | 5 | Comentario o nombre completo |
+| `/root` | 6 | Directorio home |
+| `/bin/bash` | 7 | Shell por defecto |
+
+Con `cut -d: -f1,6` extraemos solo el nombre y el home — ignoramos los otros 5 campos.
+
+**En campo real, `cut` se usa para:**
+- Extraer IPs de logs: `cut -d' ' -f1 access.log`
+- Obtener nombres de procesos: `ps aux | cut -c 66-` (a partir del carácter 66)
+- Procesar CSV: `cut -d, -f2 datos.csv`
+- Extraer el primer campo de rutas: `echo $PATH | cut -d: -f1`
+
+---
+
+#### `grep` — Buscar patrones en texto
+
+**Sintaxis:**
+```bash
+grep "patron" archivo            # busca líneas que contienen el patrón
+grep "patron" archivo | wc -l   # contar cuántas líneas coinciden
+grep "^d" archivo               # líneas que empiezan con 'd'
+grep -v "patron" archivo        # líneas que NO contienen el patrón
+grep -i "patron" archivo        # sin distinguir mayúsculas/minúsculas
+grep -E "patron1|patron2"       # varios patrones (OR)
+```
+
+**Qué hace:** Filtra líneas de texto que coinciden con un patrón. La entrada puede ser un archivo o la salida de otro comando via tubería. Es el filtro más usado en Linux.
+
+**Ejemplos del lab:**
+
+```bash
+grep "PATH" ~/.zshrc | wc -l
+```
+```
+14
+```
+De las líneas de `~/.zshrc`, 14 contienen la palabra "PATH".
+
+```bash
+grep "PATH" ~/.zshrc && grep "HOME" ~/.zshrc
+```
+```
+# If you come from bash you might have to change your $PATH.
+# export PATH=$HOME/bin:/usr/local/bin:$PATH
+export PATH=$PATH:/home/labex/.local/bin
+...
+# export PATH=$HOME/bin:/usr/local/bin:$PATH
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+export JRE_HOME=$JAVA_HOME
+```
+
+Aquí `&&` no está filtrando — está ejecutando ambos greps en secuencia (el primero tiene éxito porque encuentra resultados, entonces ejecuta el segundo).
+
+```bash
+grep "bin" /etc/passwd | sort | head -n 5
+```
+```
+_apt:x:100:65534::/nonexistent:/usr/sbin/nologin
+avahi:x:109:114:Avahi mDNS daemon,,,:/run/avahi-daemon:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+colord:x:111:118:colord colour management daemon,,,:/var/lib/colord:/usr/sbin/nologin
+```
+
+Primero filtra líneas que contienen "bin", luego las ordena alfabéticamente, luego toma las primeras 5.
+
+**Los patrones especiales de `grep` (expresiones regulares básicas):**
+
+| Patrón | Qué busca | Ejemplo |
+|--------|----------|---------|
+| `^texto` | Líneas que **empiezan** con "texto" | `grep '^d'` → líneas que empiezan con d |
+| `texto$` | Líneas que **terminan** con "texto" | `grep 'bash$'` → líneas que terminan en bash |
+| `.` | Cualquier carácter | `grep 'a.b'` → aXb, a1b, a b... |
+| `*` | Cero o más del carácter anterior | `grep 'ab*c'` → ac, abc, abbc... |
+| `\|` | OR (con `-E`) | `grep -E 'bash\|zsh'` → líneas con bash O zsh |
+
+> `grep '^d'` en el lab filtra los directorios de `ls -l /etc` porque `ls -l` muestra `drwxr-xr-x` para directorios — la `d` es siempre el primer carácter.
+
+---
+
+#### `wc` — Contar líneas, palabras y caracteres
+
+**Sintaxis:**
+```bash
+wc archivo              # muestra líneas, palabras y caracteres
+wc -l archivo           # solo líneas
+wc -w archivo           # solo palabras
+wc -c archivo           # solo caracteres (bytes)
+comando | wc -l         # contar la salida de otro comando
+```
+
+**Qué hace:** Word Count — cuenta líneas, palabras o caracteres de un archivo o de la entrada que llega por tubería.
+
+**Ejemplos del lab:**
+
+```bash
+ls -l /etc | grep '^d' | wc -l
+```
+```
+103
+```
+Cuenta cuántos directorios hay en `/etc`.
+
+```bash
+grep "PATH" ~/.zshrc | wc -l
+```
+```
+14
+```
+Cuenta cuántas líneas de `~/.zshrc` mencionan "PATH".
+
+```bash
+wc -l /etc/passwd
+```
+```
+35 /etc/passwd
+```
+El sistema tiene 35 usuarios (una línea por usuario en `/etc/passwd`).
+
+```bash
+head -n 10 /etc/passwd | wc -w
+```
+```
+10
+```
+
+Esto parece raro: `head` sacó 10 líneas, pero `wc -w` dice 10 palabras — ¿una sola palabra por línea? Sí, porque `wc` define "palabra" como texto separado por espacios. Las líneas de `/etc/passwd` usan `:` como separador, no espacios — así que cada línea completa `root:x:0:0:root:/root:/bin/bash` cuenta como **una sola palabra** (no hay espacios). 10 líneas × 1 palabra = 10.
+
+**`wc -l` vs `wc -w` — cuándo usar cada uno:**
+
+| Flag | Cuándo usarlo |
+|------|--------------|
+| `-l` | Contar resultados (usuarios, archivos, líneas de log...) |
+| `-w` | Contar palabras en texto con espacios (párrafos, comentarios...) |
+| `-c` | Medir tamaño de un archivo o salida en bytes |
+
+---
+
+#### `sort` — Ordenar líneas de texto
+
+**Sintaxis:**
+```bash
+sort archivo                    # orden alfabético ascendente
+sort -r archivo                 # orden inverso
+sort -n archivo                 # orden numérico (no alfabético)
+sort -t: -k3 -n archivo         # ordenar por el campo 3, delimitado por ':', numéricamente
+sort -rh archivo                # numérico en unidades humanas (K/M/G), reverso
+```
+
+**Qué hace:** Ordena las líneas de un archivo o de una tubería. Sin flags, ordena alfabéticamente. Con flags, puede ordenar por campos específicos o por valor numérico.
+
+**Ejemplo del lab:**
+```bash
+sort -t: -k3 -n /etc/passwd | head -n 5
+```
+```
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+```
+
+Esto ordena el archivo de usuarios por UID (el tercer campo) de menor a mayor. El resultado muestra que `root` tiene UID 0, `daemon` tiene 1, `bin` tiene 2...
+
+**Desglose de los flags:**
+
+| Flag | Qué hace en este contexto |
+|------|--------------------------|
+| `-t:` | El separador de campos es `:` (igual que en `cut`) |
+| `-k3` | Ordena por el campo número 3 (el UID) |
+| `-n` | Orden numérico — sin esto, `10` vendría antes de `2` porque `1` < `2` en texto |
+
+**Por qué `-n` importa tanto:**
+
+Sin `-n` (orden alfabético):
+```
+10
+2
+35
+9
+```
+
+Con `-n` (orden numérico):
+```
+2
+9
+10
+35
+```
+
+El ejemplo ya lo viste en el Lab 12: `sort -rh` para ordenar tamaños de disco con `du`. Sin `-h`, `9M` quedaría después de `844M` porque el carácter `9` > `8`.
+
+---
+
+#### `uniq` — Eliminar o contar líneas duplicadas
+
+**Sintaxis:**
+```bash
+uniq archivo                    # elimina líneas consecutivas duplicadas
+sort archivo | uniq             # el patrón completo: ordenar primero, luego deduplicar
+sort archivo | uniq -c          # contar cuántas veces aparece cada línea
+sort archivo | uniq -d          # mostrar solo las que tienen duplicados
+sort archivo | uniq -u          # mostrar solo las que son únicas (sin duplicados)
+```
+
+**Qué hace:** Elimina líneas **consecutivas** repetidas. La limitación clave es "consecutivas" — por eso casi siempre se usa después de `sort`.
+
+**Ejemplos del lab:**
+
+```bash
+cut -d: -f7 /etc/passwd | sort | uniq
+```
+```
+/bin/bash
+/bin/false
+/bin/sh
+/bin/sync
+/usr/bin/zsh
+/usr/sbin/nologin
+```
+
+Extrae el campo 7 (shell por defecto) de todos los usuarios, los ordena y elimina duplicados. Resultado: los shells únicos que existen en el sistema.
+
+```bash
+cut -d: -f7 /etc/passwd | sort | uniq -c
+```
+```
+      1 /bin/bash
+      1 /bin/false
+      1 /bin/sh
+      1 /bin/sync
+      1 /usr/bin/zsh
+     30 /usr/sbin/nologin
+```
+
+El mismo pipeline pero con `-c` (count). Ahora ves cuántos usuarios usan cada shell. Resultado revelador: 30 de los 35 usuarios del sistema usan `/usr/sbin/nologin` — son cuentas de servicio que no pueden iniciar sesión interactivamente. Solo hay 1 usuario real con shell interactivo (`/bin/bash`, que es root).
+
+**Por qué `sort` antes de `uniq` es obligatorio:**
+
+`uniq` solo elimina duplicados **adyacentes**. Si el archivo es:
+```
+bash
+nologin
+bash
+nologin
+```
+`uniq` sin `sort` devolvería las 4 líneas (ninguna está adyacente a su duplicado). Con `sort` primero:
+```
+bash
+bash
+nologin
+nologin
+```
+Ahora `uniq` puede eliminar: `bash`, `nologin`.
+
+---
+
+#### Técnica avanzada: pipe hacia un bloque `{ }`
+
+**Ejemplo del lab:**
+```bash
+grep "sh" /etc/passwd | wc -l | {
+  read count
+  [ $count -gt 5 ] && grep "sh" /etc/passwd || echo "Found $count lines, not enough to display."
+}
+```
+```
+Found 4 lines, not enough to display.
+```
+
+Este patrón canaliza la salida de `wc -l` (un número) hacia un bloque de código `{ }`:
+
+1. `grep "sh" /etc/passwd | wc -l` → produce `4` (hay 4 líneas que contienen "sh")
+2. `read count` → la variable `count` toma el valor `4` que llegó por tubería
+3. `[ $count -gt 5 ]` → ¿es 4 mayor que 5? No
+4. Como la condición falla (`&&` no activa el segundo), el `||` sí activa el `echo`
+5. Resultado: imprime el mensaje con el conteo
+
+Esto demuestra que puedes pipe-ar hacia lógica completa, no solo comandos simples.
+
+> Este patrón es el precursor de los scripts: cuando la lógica se vuelve más compleja, el siguiente paso natural es moverla a un archivo `.sh`.
+
+---
+
+#### Flujo completo del lab
+
+```
+1. date && ls ~                         → Ejecutar dos comandos en secuencia (ambos siempre tienen éxito)
+        ↓
+2. which cowsay && cowsay "..." || echo "no instalado"
+                                        → Verificar si existe → usarlo → o alternativa
+        ↓
+3. sudo apt-get update && sudo apt-get install -y cowsay
+                                        → Patrón clásico: actualizar y luego instalar
+        ↓
+4. ls -l /etc | grep '^d' | wc -l      → Contar directorios en /etc (pipeline de 3 comandos)
+        ↓
+5. cut -d: -f1,6 /etc/passwd           → Extraer nombre y home de cada usuario
+        ↓
+6. grep "PATH" ~/.zshrc | wc -l        → Contar líneas de config que mencionan PATH
+        ↓
+7. grep "bin" /etc/passwd | sort | head → Filtrar, ordenar y tomar los primeros
+        ↓
+8. wc -l /etc/passwd                   → Contar usuarios del sistema
+        ↓
+9. sort -t: -k3 -n /etc/passwd | head  → Ordenar usuarios por UID
+        ↓
+10. cut -d: -f7 /etc/passwd | sort | uniq -c
+                                        → Contar cuántos usuarios usan cada shell
+```
+
+---
+
+#### Errores frecuentes — Lab 13
+
+**`&&` en lugar de `|` — comandos que no se conectan**
+
+```bash
+ls -l /etc && grep '^d'    # ERROR conceptual
+ls -l /etc | grep '^d'     # CORRECTO
+```
+`&&` ejecuta `grep '^d'` como comando independiente (sin entrada), que queda esperando texto del teclado. `|` conecta la salida de `ls` como entrada de `grep`.
+
+**`uniq` sin `sort` — duplicados que no se eliminan**
+
+Si los duplicados no están juntos en el archivo, `uniq` no los detecta. Siempre el patrón es `sort | uniq`, no solo `uniq`.
+
+**`cut` con el delimitador equivocado**
+
+`cut -d: -f1 archivo.csv` en un CSV separado por comas no funciona — el delimitador es `,`. La flag `-d` acepta exactamente un carácter. Para CSV: `cut -d, -f1`.
+
+**`wc -l` cuenta una línea más si el archivo no termina en newline**
+
+Algunos archivos generados por programas no tienen salto de línea al final. `wc -l` cuenta saltos de línea, no líneas — así que un archivo con `N` líneas pero sin `\n` final reporta `N-1`. Para contar líneas reales: `grep -c '' archivo`.
+
+**`grep "patron"` sin comillas en patrones con espacios o caracteres especiales**
+
+```bash
+grep path=/home /etc/passwd        # si "path=/home" tiene caracteres especiales, falla
+grep "path=/home" /etc/passwd      # CORRECTO — comillas protegen el patrón
+```
+
+**`sort -n` con texto no numérico**
+
+`sort -n` en un campo de texto produce resultados impredecibles. Solo usa `-n` cuando el campo es efectivamente un número (UID, contador, tamaño...).
+
+---
+
+#### Ejercicio — Lab 13
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Preparación:**
+```bash
+# Crea un archivo de datos de prueba
+cat << 'EOF' > ~/ventas.csv
+producto,cantidad,precio
+manzana,5,1.50
+naranja,3,2.00
+manzana,8,1.50
+pera,2,3.00
+naranja,6,2.00
+banana,10,0.80
+pera,1,3.00
+manzana,3,1.50
+EOF
+```
+
+**Tareas:**
+
+1. Usa `wc -l ~/ventas.csv` para saber cuántas líneas tiene el archivo (incluyendo el encabezado).
+2. Extrae solo la columna de productos con `cut -d, -f1 ~/ventas.csv`.
+3. Pipe ese resultado a `sort | uniq -c | sort -rn` para saber cuántas veces aparece cada producto.
+4. Cuenta cuántos directorios hay en `/tmp` con `ls -l /tmp | grep '^d' | wc -l`.
+5. Lista los shells únicos del sistema con `cut -d: -f7 /etc/passwd | sort | uniq`.
+6. Verifica si el comando `tree` está instalado con `which tree && tree /tmp --max-depth 1 || echo "tree no está instalado"`.
+7. Usa `wc -l /etc/passwd && wc -l /etc/group` para contar usuarios y grupos del sistema.
+8. Encadena: extrae el campo de home de `/etc/passwd`, ordénalos y muestra los 5 primeros: `cut -d: -f6 /etc/passwd | sort | head -5`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+wc -l ~/ventas.csv
+
+# Paso 2
+cut -d, -f1 ~/ventas.csv
+
+# Paso 3
+cut -d, -f1 ~/ventas.csv | sort | uniq -c | sort -rn
+
+# Paso 4
+ls -l /tmp | grep '^d' | wc -l
+
+# Paso 5
+cut -d: -f7 /etc/passwd | sort | uniq
+
+# Paso 6
+which tree && tree /tmp --max-depth 1 || echo "tree no está instalado"
+
+# Paso 7
+wc -l /etc/passwd && wc -l /etc/group
+
+# Paso 8
+cut -d: -f6 /etc/passwd | sort | head -5
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -4661,6 +5254,29 @@ sudo fdisk -l disco_prueba.img
 | `sudo fdisk -l` | Lista todos los discos del sistema y sus tablas de particiones | 12 |
 | `sudo fdisk -l archivo.img` | Muestra la información de un archivo de imagen de disco | 12 |
 | `lsof /mnt/punto` | Lista los procesos que tienen archivos abiertos en ese punto de montaje | 12 |
+| `cmd1 && cmd2` | Ejecuta cmd2 solo si cmd1 tiene éxito (código de salida 0) | 13 |
+| `cmd1 \|\| cmd2` | Ejecuta cmd2 solo si cmd1 falla (código de salida ≠ 0) | 13 |
+| `cmd1 \| cmd2` | Conecta la salida de cmd1 con la entrada de cmd2 | 13 |
+| `echo $?` | Muestra el código de salida del último comando ejecutado | 13 |
+| `cut -d: -f1 archivo` | Extrae el primer campo de un archivo con delimitador ':' | 13 |
+| `cut -d: -f1,6 archivo` | Extrae los campos 1 y 6 separados por ':' | 13 |
+| `cut -d, -f2 archivo` | Extrae el segundo campo de un CSV separado por comas | 13 |
+| `grep "patron" archivo` | Filtra líneas que contienen el patrón | 13 |
+| `grep '^d' archivo` | Filtra líneas que empiezan con 'd' | 13 |
+| `grep -v "patron" archivo` | Filtra líneas que NO contienen el patrón | 13 |
+| `grep -i "patron" archivo` | Búsqueda sin distinguir mayúsculas/minúsculas | 13 |
+| `grep -E "p1\|p2" archivo` | Busca líneas que contienen p1 o p2 (OR) | 13 |
+| `wc -l archivo` | Cuenta el número de líneas | 13 |
+| `wc -w archivo` | Cuenta el número de palabras (separadas por espacios) | 13 |
+| `wc -c archivo` | Cuenta el número de bytes | 13 |
+| `sort archivo` | Ordena líneas alfabéticamente | 13 |
+| `sort -n archivo` | Ordena numéricamente | 13 |
+| `sort -r archivo` | Ordena en orden inverso | 13 |
+| `sort -t: -k3 -n archivo` | Ordena por el campo 3 (delimitado por ':') numéricamente | 13 |
+| `sort \| uniq` | Elimina líneas duplicadas (sort primero es obligatorio) | 13 |
+| `sort \| uniq -c` | Cuenta cuántas veces aparece cada línea | 13 |
+| `sort \| uniq -d` | Muestra solo las líneas que tienen al menos un duplicado | 13 |
+| `sort \| uniq -u` | Muestra solo las líneas completamente únicas | 13 |
 
 ---
 
@@ -4879,3 +5495,25 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **Buffer de escritura** | Área en RAM donde el kernel acumula escrituras antes de enviarlas al disco — mejora rendimiento |
 | **`sort -h`** | Flag de sort para ordenar correctamente valores con sufijos humanos (K, M, G) |
 | **`sort -r`** | Flag de sort para ordenar en orden inverso (mayor a menor) |
+| **`&&`** | Operador AND lógico — ejecuta el segundo comando solo si el primero tiene éxito (exit code 0) |
+| **`\|\|`** | Operador OR lógico — ejecuta el segundo comando solo si el primero falla (exit code ≠ 0) |
+| **`\|` (pipe)** | Tubería — conecta la salida estándar de un comando con la entrada estándar del siguiente |
+| **Código de salida** | Número que devuelve cada programa al terminar — 0 = éxito, cualquier otro = algún tipo de error |
+| **`$?`** | Variable especial que guarda el código de salida del último comando |
+| **`cut`** | Extrae columnas específicas de texto estructurado usando un delimitador y número de campo |
+| **`-d` en cut** | Define el delimitador (el carácter que separa campos) — por defecto es el tabulador |
+| **`-f` en cut** | Especifica qué campos extraer (1-indexed) — puede ser uno (`-f1`), varios (`-f1,3`) o un rango (`-f2-5`) |
+| **`grep`** | Global Regular Expression Print — filtra líneas que coinciden con un patrón |
+| **`^` en grep** | Ancla de inicio — el patrón debe estar al comienzo de la línea |
+| **`$` en grep** | Ancla de fin — el patrón debe estar al final de la línea |
+| **`wc`** | Word Count — cuenta líneas (`-l`), palabras (`-w`) o bytes (`-c`) de texto |
+| **`sort`** | Ordena líneas de texto — alfabético por defecto, numérico con `-n`, por campo con `-k` |
+| **`-k` en sort** | Especifica el campo por el cual ordenar (equivalente a `-f` en cut) |
+| **`uniq`** | Elimina o cuenta líneas consecutivas duplicadas — requiere `sort` previo para funcionar correctamente |
+| **`uniq -c`** | Agrega un contador al inicio de cada línea indicando cuántas veces aparece |
+| **`/etc/passwd`** | Archivo que contiene la definición de todos los usuarios del sistema — 7 campos separados por `:` |
+| **`/etc/shadow`** | Archivo que contiene las contraseñas encriptadas — solo root puede leerlo |
+| **`/usr/sbin/nologin`** | Shell especial que rechaza el inicio de sesión — usado en cuentas de servicio del sistema |
+| **Expresión regular** | Patrón de texto con sintaxis especial para describir conjuntos de cadenas — base de `grep`, `sed`, `awk` |
+| **Pipeline** | Cadena de comandos conectados por tuberías donde cada uno procesa la salida del anterior |
+| **`cowsay`** | Herramienta de entretenimiento que muestra texto con una vaca ASCII — útil para demos y banners en scripts |
