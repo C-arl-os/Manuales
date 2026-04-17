@@ -25,6 +25,7 @@
   - [Lab 12 — Discos, Particiones y Sistemas de Archivos](#lab-12--discos-particiones-y-sistemas-de-archivos)
   - [Lab 13 — Tuberías, Operadores Condicionales y Procesamiento de Texto](#lab-13--tuberías-operadores-condicionales-y-procesamiento-de-texto)
   - [Lab 14 — Desafío: Procesar Datos de Sensores](#lab-14--desafío-procesar-datos-de-sensores)
+  - [Lab 15 — tr, col, join y paste: Transformar y Combinar Texto](#lab-15--tr-col-join-y-paste-transformar-y-combinar-texto)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -5462,6 +5463,578 @@ Dos errores únicos — `1001` apareció dos veces en el original, `uniq` lo red
 
 ---
 
+### Lab 15 — tr, col, join y paste: Transformar y Combinar Texto
+
+**Escenario:** Los datos de texto rara vez llegan en el formato exacto que necesitas. A veces hay que cambiar mayúsculas, limpiar caracteres no deseados, convertir tabulaciones a espacios, cruzar datos de dos archivos por un campo común, o pegar columnas de archivos distintos lado a lado. Este lab enseña cuatro herramientas de transformación que hacen exactamente eso — cada una resuelve un problema diferente, y juntas cubren la mayor parte del trabajo de transformación de texto del día a día.
+
+---
+
+#### `tr` — Traducir, eliminar o comprimir caracteres
+
+**Sintaxis:**
+```bash
+echo "texto" | tr SET1 SET2       # reemplaza caracteres de SET1 por los de SET2
+echo "texto" | tr -d SET1         # elimina todos los caracteres de SET1
+echo "texto" | tr -s SET1         # comprime repeticiones consecutivas de SET1
+```
+
+**Qué hace:** `tr` (translate) transforma el texto carácter por carácter. No trabaja con palabras ni líneas — trabaja con caracteres individuales. Siempre recibe texto por tubería (no acepta archivos como argumento directamente).
+
+> Piénsalo como una tabla de sustitución: "cada vez que veas el carácter A, cámbialo por el carácter X". La tabla se define con los dos conjuntos que le das.
+
+---
+
+**`tr SET1 SET2` — Mapeo de caracteres uno a uno**
+
+Cada carácter en SET1 se reemplaza por el carácter en la misma posición de SET2.
+
+**Ejemplo del lab:**
+```bash
+echo 'hello world' | tr 'ol' 'OL'
+```
+```
+heLLO wOrLd
+```
+
+La tabla de mapeo es:
+```
+o → O
+l → L
+```
+
+Cada `o` minúscula en la entrada se convierte en `O` mayúscula, y cada `l` se convierte en `L`. Las demás letras no cambian. Nota que hay dos `l` seguidas en "hello" — cada una se mapea individualmente, por eso el resultado tiene dos `L`.
+
+**Ejemplo más simple:**
+```bash
+echo 'abc' | tr 'abc' 'xyz'
+# a→x, b→y, c→z
+```
+```
+xyz
+```
+
+**La regla del mapeo:** SET1 y SET2 deben tener el mismo número de caracteres. Si SET2 es más corto, el último carácter de SET2 se usa para todos los caracteres restantes de SET1.
+
+---
+
+**`tr '[:lower:]' '[:upper:]'` — Clases de caracteres**
+
+```bash
+echo 'hello labex' | tr '[:lower:]' '[:upper:]'
+```
+```
+HELLO LABEX
+```
+
+En lugar de listar cada letra del alfabeto (`tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'`), `tr` tiene clases predefinidas:
+
+| Clase | Qué representa |
+|-------|---------------|
+| `[:lower:]` | Todas las letras minúsculas (a-z) |
+| `[:upper:]` | Todas las letras mayúsculas (A-Z) |
+| `[:digit:]` | Todos los dígitos (0-9) |
+| `[:alpha:]` | Todas las letras (a-z y A-Z) |
+| `[:alnum:]` | Letras y dígitos |
+| `[:space:]` | Espacios, tabulaciones, saltos de línea |
+| `[:punct:]` | Signos de puntuación |
+
+`tr '[:lower:]' '[:upper:]'` es la forma correcta de convertir todo a mayúsculas — funciona incluso con letras acentuadas en algunos sistemas, mientras que `tr 'a-z' 'A-Z'` puede fallar con caracteres no ASCII.
+
+**En campo real:** Normalizar nombres antes de comparar, convertir cabeceras de CSV, preparar datos para herramientas que son sensibles a mayúsculas.
+
+---
+
+**`tr -d SET` — Eliminar caracteres**
+
+```bash
+echo "hello labex" | tr -d 'olh'
+```
+```
+e abex
+```
+
+`-d` (delete) elimina cada carácter del conjunto sin reemplazarlo por nada. De "hello labex": `h` eliminado, `e` queda, `l` eliminado, `l` eliminado, `o` eliminado, ` ` queda, `l` eliminado, `a` queda, `b` queda, `e` queda, `x` queda.
+
+Resultado: `e abex` (con el espacio en su lugar).
+
+**Usos reales de `tr -d`:**
+```bash
+# Eliminar saltos de línea (unir todo en una línea)
+cat archivo.txt | tr -d '\n'
+
+# Eliminar tabulaciones
+cat archivo.txt | tr -d '\t'
+
+# Eliminar dígitos de un texto
+echo "abc123def456" | tr -d '[:digit:]'
+# abc def
+
+# Eliminar caracteres de retorno de carro Windows (\r) de archivos convertidos
+cat archivo_windows.txt | tr -d '\r' > archivo_linux.txt
+```
+
+Este último caso es muy común en equipos mixtos Windows/Linux: los archivos de texto de Windows terminan las líneas con `\r\n` (retorno de carro + nueva línea), pero Linux espera solo `\n`. Archivos con `\r` extra causan problemas en scripts.
+
+---
+
+**`tr -s SET` — Comprimir (squeeze) caracteres repetidos**
+
+```bash
+echo 'hello' | tr -s 'l'
+```
+```
+helo
+```
+
+`-s` (squeeze) reemplaza una secuencia de caracteres idénticos **consecutivos** por uno solo. "hello" tiene dos `l` seguidas → se comprimen a una sola.
+
+```bash
+echo 'ballon' | tr -s 'o'
+```
+```
+ballon
+```
+
+"ballon" tiene solo una `o` → no hay nada que comprimir → la salida es idéntica a la entrada. `tr -s` no cambia nada si el carácter ya aparece solo.
+
+**Uso real de `-s`:**
+```bash
+# Comprimir espacios múltiples a uno solo
+echo "esto    tiene   muchos    espacios" | tr -s ' '
+# esto tiene muchos espacios
+
+# Limpiar líneas vacías múltiples de un archivo
+cat archivo.txt | tr -s '\n'
+```
+
+---
+
+#### `cat -A` y `col -x` — Ver y limpiar caracteres invisibles
+
+**`cat -A` — Mostrar todos los caracteres, incluyendo invisibles**
+
+```bash
+cat -A /etc/protocols | head -n 10
+```
+```
+# Internet (IP) protocols$
+#$
+ip^I0^IIP^I^I# internet protocol$
+```
+
+`cat -A` agrega marcas a los caracteres no visibles:
+
+| Símbolo que muestra | Carácter real | Qué es |
+|--------------------|---------------|--------|
+| `$` al final | `\n` | Fin de línea (newline) — aparece al final de **cada** línea |
+| `^I` | `\t` | Tabulación horizontal (Tab) |
+| `^M` | `\r` | Retorno de carro (carriage return) — señal de que el archivo es de Windows |
+| `^@` | `\0` | Byte nulo |
+
+En la salida del lab, `ip^I0^IIP^I^I# internet protocol` significa: la palabra `ip`, luego un Tab (`^I`), luego `0`, luego un Tab, luego `IP`, luego dos Tabs, luego el comentario.
+
+**Por qué esto importa en campo real:**
+
+Cuando un script falla con comportamiento extraño, `cat -A` revela caracteres ocultos que causan el problema. Los más comunes:
+- `^M` al final de líneas → archivo fue editado en Windows y tiene `\r\n` en vez de `\n`
+- `^I` donde no debería haber → el archivo usa tabs donde el script espera espacios (o viceversa)
+- `$` en una posición inesperada → puede indicar un salto de línea embebido en medio de un campo
+
+---
+
+**`col -x` — Convertir tabulaciones a espacios**
+
+```bash
+cat /etc/protocols | col -x | cat -A | head -n 10
+```
+```
+ip      0       IP              # internet protocol$
+```
+
+Comparado con la versión sin `col -x`:
+```
+ip^I0^IIP^I^I# internet protocol$
+```
+
+`col -x` reemplaza cada tabulación (`^I`) por los espacios necesarios para llegar a la siguiente columna de 8 en 8. El resultado es texto con espacios en vez de tabs — visualmente similar pero sin el carácter de tabulación.
+
+**Pipeline en este ejemplo:**
+
+```
+cat /etc/protocols          → lee el archivo con tabulaciones
+      |
+col -x                      → convierte cada \t a espacios equivalentes
+      |
+cat -A                      → muestra el resultado para verificar que no hay ^I
+      |
+head -n 10                  → toma solo las primeras 10 líneas
+```
+
+**Cuándo usar `col -x`:**
+- Preparar texto con tabs para herramientas que no los entienden
+- Convertir salida de columnas (como `column -t` o `ps aux`) antes de procesarla con `cut` (que usa espacios, no tabs, por defecto)
+- Limpiar archivos de documentación que mezclan tabs y espacios
+
+---
+
+#### `join` — Cruzar datos de dos archivos por un campo común
+
+**Sintaxis:**
+```bash
+join archivo1 archivo2                 # join por el campo 1 de ambos archivos
+join -1 N -2 M archivo1 archivo2       # join por el campo N de archivo1 y campo M de archivo2
+join -a 1 archivo1 archivo2            # incluir también las líneas sin coincidencia de archivo1
+```
+
+**Qué hace:** `join` es la versión de terminal del `JOIN` de SQL. Une líneas de dos archivos cuando tienen el mismo valor en un campo determinado. Produce una línea combinada por cada coincidencia.
+
+**Regla crítica: ambos archivos deben estar ordenados por el campo que se usa como clave de join**, de lo contrario el resultado es incorrecto o vacío.
+
+**Preparación del lab:**
+```bash
+echo -e "1 apple\n2 banana\n3 cherry" > fruits.txt
+echo -e "1 red\n2 yellow\n3 red" > colors.txt
+```
+
+Esto crea:
+```
+fruits.txt          colors.txt
+1 apple             1 red
+2 banana            2 yellow
+3 cherry            3 red
+```
+
+**Ejemplo básico:**
+```bash
+join fruits.txt colors.txt
+```
+```
+1 apple red
+2 banana yellow
+3 cherry red
+```
+
+`join` usó el campo 1 (el número) como clave:
+- Línea con `1`: `apple` de fruits + `red` de colors → `1 apple red`
+- Línea con `2`: `banana` + `yellow` → `2 banana yellow`
+- Línea con `3`: `cherry` + `red` → `3 cherry red`
+
+El campo clave aparece una sola vez en el resultado.
+
+---
+
+**`join -1 2 -2 2` — Join por el campo 2 de ambos archivos**
+
+```bash
+join -1 2 -2 2 <(sort -k2 fruits.txt) <(sort -k2 colors.txt)
+```
+```
+(salida vacía)
+```
+
+Este comando intentó unir ambos archivos por su campo 2:
+- Campo 2 de `fruits.txt`: `apple`, `banana`, `cherry`
+- Campo 2 de `colors.txt`: `red`, `yellow`, `red`
+
+No hay ningún valor en común entre esos dos conjuntos (`apple` ≠ `red`, `banana` ≠ `yellow`...) → cero coincidencias → salida vacía. El comando es sintácticamente correcto, pero los datos no tienen valores que coincidan en esa columna.
+
+**Qué hace cada parte de `-1 2 -2 2`:**
+
+| Parte | Qué dice |
+|-------|---------|
+| `-1 2` | "Usa el campo 2 del **primer** archivo como clave" |
+| `-2 2` | "Usa el campo 2 del **segundo** archivo como clave" |
+
+**La sintaxis `<()` — sustitución de proceso:**
+
+```bash
+<(sort -k2 fruits.txt)
+```
+
+Esto es **sustitución de proceso** (process substitution). `<()` ejecuta el comando dentro de los paréntesis y le pasa su salida como si fuera un archivo temporal. `join` necesita archivos como argumentos, no tuberías — `<()` resuelve eso.
+
+Equivale a:
+```bash
+# Forma larga
+sort -k2 fruits.txt > /tmp/fruits_sorted.txt
+sort -k2 colors.txt > /tmp/colors_sorted.txt
+join -1 2 -2 2 /tmp/fruits_sorted.txt /tmp/colors_sorted.txt
+rm /tmp/fruits_sorted.txt /tmp/colors_sorted.txt
+```
+
+`<()` hace todo eso en una sola línea sin archivos temporales.
+
+**En campo real, `join` se usa para:**
+- Cruzar un archivo de usuarios con un archivo de permisos (por username)
+- Combinar reportes de ventas con catálogo de productos (por ID de producto)
+- Unir logs de dos sistemas diferentes por timestamp
+- El equivalente de `INNER JOIN` en SQL pero en la línea de comandos
+
+---
+
+#### `paste` — Pegar archivos lado a lado por columnas
+
+**Sintaxis:**
+```bash
+paste archivo1 archivo2 archivo3       # une columnas con Tab como separador
+paste -d ':' archivo1 archivo2         # usa ':' como separador en vez de Tab
+paste -s archivo1 archivo2            # modo serial: cada archivo se convierte en una línea
+```
+
+**Qué hace:** `paste` une archivos horizontalmente — toma la primera línea de cada archivo y las pone en una sola línea separadas por el delimitador. Es como `join` pero sin necesidad de campo común: une por posición (línea 1 con línea 1, línea 2 con línea 2...).
+
+**Preparación del lab:**
+```bash
+echo -e "apple\nbanana\ncherry" > fruits.txt
+echo -e "red\nyellow\nred" > colors.txt
+echo -e "sweet\nsweet\nsweet" > tastes.txt
+```
+
+Los tres archivos:
+```
+fruits.txt    colors.txt    tastes.txt
+apple         red           sweet
+banana        yellow        sweet
+cherry        red           sweet
+```
+
+---
+
+**`paste` básico — Tab como separador:**
+```bash
+paste fruits.txt colors.txt tastes.txt
+```
+```
+apple	red	sweet
+banana	yellow	sweet
+cherry	red	sweet
+```
+
+La línea 1 de cada archivo se combina: `apple` + `red` + `sweet`. La línea 2: `banana` + `yellow` + `sweet`. El separador entre columnas es una tabulación (invisible pero está ahí).
+
+---
+
+**`paste -d ':'` — Separador personalizado:**
+```bash
+paste -d ':' fruits.txt colors.txt tastes.txt
+```
+```
+apple:red:sweet
+banana:yellow:sweet
+cherry:red:sweet
+```
+
+El `:` reemplaza el Tab como separador. Esto produce directamente texto con formato de campos separados por `:` — útil para generar CSV (con `-d ','`) o formatos como `/etc/passwd`.
+
+---
+
+**`paste -s` — Modo serial (cada archivo en una sola línea):**
+```bash
+paste -s fruits.txt colors.txt tastes.txt
+```
+```
+apple	banana	cherry
+red	yellow	red
+sweet	sweet	sweet
+```
+
+Con `-s`, en lugar de combinar los archivos columna a columna, toma **cada archivo** y pone todas sus líneas en una sola línea separadas por Tab. Útil cuando necesitas convertir una lista vertical en una lista horizontal.
+
+**Diferencia visual entre `paste` normal y `paste -s`:**
+
+```
+Sin -s (une líneas correspondientes de cada archivo):
+archivo1_línea1  archivo2_línea1  archivo3_línea1
+archivo1_línea2  archivo2_línea2  archivo3_línea2
+
+Con -s (serializa cada archivo):
+archivo1_línea1  archivo1_línea2  archivo1_línea3
+archivo2_línea1  archivo2_línea2  archivo2_línea3
+```
+
+---
+
+**`join` vs `paste` — cuándo usar cada uno:**
+
+| Situación | Herramienta | Por qué |
+|-----------|------------|---------|
+| Los archivos tienen un campo ID en común | `join` | Une por coincidencia de valor, no por posición |
+| Los archivos tienen el mismo número de líneas y el orden es la clave | `paste` | Une por posición, sin necesidad de campo común |
+| Necesitas algo como SQL JOIN | `join` | Diseñado exactamente para eso |
+| Necesitas construir columnas de forma horizontal | `paste` | Diseñado para eso |
+| Los archivos pueden tener líneas que no coinciden | `join -a` | `join` con salida de líneas sin coincidencia |
+
+---
+
+#### `echo -e` — Saltos de línea y escapes en `echo`
+
+El lab usa `echo -e "1 apple\n2 banana\n3 cherry"` para crear archivos de varias líneas en un comando.
+
+```bash
+echo -e "1 apple\n2 banana\n3 cherry" > fruits.txt
+```
+
+`-e` activa la interpretación de secuencias de escape:
+
+| Secuencia | Carácter | Cuándo usarla |
+|-----------|---------|--------------|
+| `\n` | Salto de línea | Crear archivos multilínea en una sola línea |
+| `\t` | Tabulación | Crear texto con columnas alineadas |
+| `\r` | Retorno de carro | Raramente — solo al simular formato Windows |
+| `\\` | Backslash literal | Cuando necesitas escribir un backslash |
+
+**Sin `-e`:** `echo "\n"` imprime literalmente `\n` — dos caracteres, backslash y n.
+**Con `-e`:** `echo -e "\n"` imprime un salto de línea real — una línea vacía.
+
+---
+
+#### El error del lab: `ehco` en vez de `echo`
+
+```bash
+ehco -e "red\nyellow\nred" > colors.txt
+```
+```
+zsh: command not found: ehco
+```
+
+Un typo clásico. El shell busca el comando `ehco` y no lo encuentra. La consecuencia importante: la redirección `> colors.txt` **no se ejecutó** porque el comando falló. `colors.txt` mantiene su contenido anterior (o no se crea si no existía). Siempre verifica con `cat` después de crear archivos por redirección.
+
+---
+
+#### Flujo completo del lab
+
+```
+1. echo 'hello labex' | tr -d 'olh'
+   → Eliminar caracteres específicos del texto
+
+2. echo 'hello' | tr -s 'l'
+   → Comprimir caracteres repetidos consecutivos
+
+3. echo 'hello labex' | tr '[:lower:]' '[:upper:]'
+   → Convertir todo a mayúsculas con clase de caracteres
+
+4. echo 'hello world' | tr 'ol' 'OL'
+   → Mapeo de caracteres individuales
+
+5. cat -A /etc/protocols | head
+   → Ver los caracteres ocultos (tabs como ^I, fines de línea como $)
+
+6. cat /etc/protocols | col -x | cat -A | head
+   → Convertir tabs a espacios y verificar que ^I desapareció
+
+7. echo -e "..." > fruits.txt / colors.txt
+   join fruits.txt colors.txt
+   → Crear archivos y unirlos por el campo 1 común (el número)
+
+8. join -1 2 -2 2 <(sort -k2 fruits.txt) <(sort -k2 colors.txt)
+   → Intentar join por campo 2 — resultado vacío porque no hay valores comunes
+
+9. paste fruits.txt colors.txt tastes.txt
+   → Unir tres archivos columna a columna (por posición)
+
+10. paste -d ':' ...
+    → Mismo resultado pero con ':' como separador
+
+11. paste -s ...
+    → Cada archivo se serializa en una sola línea horizontal
+```
+
+---
+
+#### Errores frecuentes — Lab 15
+
+**`tr` con archivos en vez de tuberías**
+
+```bash
+tr 'ol' 'OL' archivo.txt    # no funciona como se espera
+```
+
+`tr` no acepta archivos como argumento. Siempre necesita su entrada por tubería o redirección:
+```bash
+cat archivo.txt | tr 'ol' 'OL'
+tr 'ol' 'OL' < archivo.txt    # alternativa con redirección de entrada
+```
+
+**`tr -s` cuando el carácter no se repite**
+
+Como vimos con `echo 'ballon' | tr -s 'o'` → la salida es `ballon` sin cambios. `tr -s` solo actúa cuando hay dos o más caracteres **consecutivos** iguales. Si solo hay uno, pasa sin cambio. No es un error — es el comportamiento correcto.
+
+**`join` sin ordenar los archivos primero**
+
+`join` requiere que ambos archivos estén ordenados por el campo de join. Sin ordenar:
+```bash
+join archivo_desordenado.txt otro_archivo.txt
+```
+Puede producir resultados incorrectos o incompletos silenciosamente. Siempre usa `sort` antes o `<(sort -kN ...)` como en el lab.
+
+**`join` vs `paste` — confundir cuándo usar cada uno**
+
+Si los archivos tienen el mismo número de líneas y ya están alineados por posición, usa `paste`. Si necesitas cruzar por un valor común (como un ID), usa `join`. Usar `paste` cuando debías usar `join` produce líneas mezcladas incorrectamente si los archivos tienen diferentes órdenes.
+
+**`paste -d` con más de un carácter**
+
+`paste -d ':,'` usa los delimitadores en rotación — primero `:`, luego `,`, luego `:`, etc. No concatena los dos caracteres como separador único. Para un separador de dos caracteres como `--`, no hay forma directa con `paste` — habría que postprocesar con `sed`.
+
+---
+
+#### Ejercicio — Lab 15
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Preparación:**
+```bash
+echo -e "101 Ana\n102 Bob\n103 Carlos" > empleados.txt
+echo -e "101 Ventas\n102 IT\n103 HR" > departamentos.txt
+echo -e "101 5000\n102 6000\n103 4500" > salarios.txt
+```
+
+**Tareas:**
+
+1. Convierte todos los nombres a mayúsculas: `cat empleados.txt | tr '[:lower:]' '[:upper:]'`
+2. Elimina los números de `empleados.txt` con `tr -d '[:digit:]'` y observa el resultado.
+3. Usa `cat -A empleados.txt` para verificar si hay caracteres ocultos.
+4. Haz join de `empleados.txt` con `departamentos.txt` para ver nombre y departamento de cada uno.
+5. Haz join de ese resultado con `salarios.txt` — nota: `join` solo une dos archivos a la vez, así que necesitas dos join consecutivos.
+6. Usa `paste -d ',' empleados.txt departamentos.txt salarios.txt` para crear un CSV.
+7. Usa `paste -s empleados.txt` para ver todos los empleados en una sola línea.
+8. Genera una versión "limpia" de cualquier archivo de sistema con tabs usando `col -x`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1
+cat empleados.txt | tr '[:lower:]' '[:upper:]'
+
+# Paso 2
+cat empleados.txt | tr -d '[:digit:]'
+
+# Paso 3
+cat -A empleados.txt
+
+# Paso 4
+join empleados.txt departamentos.txt
+
+# Paso 5 — dos join encadenados con <()
+join empleados.txt departamentos.txt > /tmp/emp_dep.txt
+join /tmp/emp_dep.txt salarios.txt
+# O en una línea con sustitución de proceso:
+join <(join empleados.txt departamentos.txt) salarios.txt
+
+# Paso 6
+paste -d ',' empleados.txt departamentos.txt salarios.txt
+
+# Paso 7
+paste -s empleados.txt
+
+# Paso 8
+col -x < /etc/protocols | head -20
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -5600,6 +6173,21 @@ Dos errores únicos — `1001` apareció dos veces en el original, `uniq` lo red
 | `sort -k1,1` | Ordena usando solo el campo 1 como clave (inicio,fin del campo) | 14 |
 | `sort -k2,2n` | Ordena numéricamente por el campo 2 exactamente | 14 |
 | `grep "patron" archivo \| sort -k1,1 \| uniq > resultado` | Pipeline completo: filtrar → ordenar → deduplicar → guardar | 14 |
+| `echo "texto" \| tr 'ab' 'AB'` | Reemplaza 'a'→'A' y 'b'→'B' (mapeo carácter por carácter) | 15 |
+| `echo "texto" \| tr '[:lower:]' '[:upper:]'` | Convierte todo a mayúsculas usando clases de caracteres | 15 |
+| `echo "texto" \| tr -d 'aeiou'` | Elimina todos los caracteres del conjunto indicado | 15 |
+| `echo "texto" \| tr -d '\r'` | Elimina retornos de carro Windows de un archivo | 15 |
+| `echo "texto" \| tr -s ' '` | Comprime múltiples espacios consecutivos a uno solo | 15 |
+| `cat -A archivo` | Muestra todos los caracteres incluyendo ocultos: tabs como ^I, fin de línea como $ | 15 |
+| `cat archivo \| col -x` | Convierte tabulaciones a espacios equivalentes | 15 |
+| `join archivo1 archivo2` | Une líneas de dos archivos por el campo 1 (como SQL JOIN) | 15 |
+| `join -1 N -2 M archivo1 archivo2` | Une por el campo N del archivo1 y campo M del archivo2 | 15 |
+| `join -a 1 archivo1 archivo2` | Incluye también las líneas de archivo1 sin coincidencia | 15 |
+| `paste archivo1 archivo2` | Combina archivos columna a columna separados por Tab | 15 |
+| `paste -d ',' archivo1 archivo2` | Combina columnas usando ',' como separador (genera CSV) | 15 |
+| `paste -s archivo` | Serializa el archivo: todas sus líneas en una sola línea horizontal | 15 |
+| `echo -e "línea1\nlínea2"` | Crea texto con saltos de línea reales (escape habilitado) | 15 |
+| `<(comando)` | Sustitución de proceso: pasa la salida del comando como si fuera un archivo | 15 |
 
 ---
 
@@ -5840,6 +6428,31 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 | **Expresión regular** | Patrón de texto con sintaxis especial para describir conjuntos de cadenas — base de `grep`, `sed`, `awk` |
 | **Pipeline** | Cadena de comandos conectados por tuberías donde cada uno procesa la salida del anterior |
 | **`cowsay`** | Herramienta de entretenimiento que muestra texto con una vaca ASCII — útil para demos y banners en scripts |
+| **`tr`** | Translate — transforma texto carácter por carácter: reemplaza, elimina o comprime caracteres |
+| **`tr SET1 SET2`** | Mapea cada carácter de SET1 al carácter en la misma posición de SET2 |
+| **`tr -d`** | Delete — elimina todos los caracteres del conjunto dado sin reemplazarlos |
+| **`tr -s`** | Squeeze — comprime secuencias consecutivas del mismo carácter a uno solo |
+| **`[:lower:]`** | Clase de caracteres de tr: representa todas las letras minúsculas (a-z) |
+| **`[:upper:]`** | Clase de caracteres de tr: representa todas las letras mayúsculas (A-Z) |
+| **`[:digit:]`** | Clase de caracteres de tr: representa todos los dígitos del 0 al 9 |
+| **`[:space:]`** | Clase de caracteres de tr: espacios, tabs, y saltos de línea |
+| **`cat -A`** | Muestra todos los caracteres incluyendo ocultos — `^I` para tabs, `$` para fin de línea, `^M` para `\r` de Windows |
+| **`^I` en cat -A** | Representación visual de una tabulación (`\t`) |
+| **`^M` en cat -A** | Representación visual del retorno de carro (`\r`) — señal de que el archivo tiene formato Windows |
+| **`col -x`** | Convierte tabulaciones a los espacios equivalentes para alinear columnas |
+| **`join`** | Une líneas de dos archivos cuando comparten el mismo valor en un campo — equivale al INNER JOIN de SQL |
+| **`-1 N` en join** | Usa el campo N del primer archivo como clave de unión |
+| **`-2 M` en join** | Usa el campo M del segundo archivo como clave de unión |
+| **`-a` en join** | También incluye las líneas sin coincidencia (como LEFT JOIN en SQL) |
+| **`paste`** | Combina archivos horizontalmente: une la línea N de cada archivo en una sola línea |
+| **`paste -d`** | Define el delimitador entre columnas (por defecto es Tab) |
+| **`paste -s`** | Modo serial — serializa cada archivo: convierte sus líneas verticales en una línea horizontal |
+| **`echo -e`** | Habilita la interpretación de secuencias de escape como `\n` (nueva línea) y `\t` (tab) |
+| **`\n` en echo -e** | Inserta un salto de línea real en la salida |
+| **`\t` en echo -e** | Inserta una tabulación real en la salida |
+| **`\r`** | Retorno de carro — en Windows, las líneas terminan en `\r\n`; en Linux, solo en `\n` |
+| **`<(comando)`** | Sustitución de proceso — ejecuta el comando y pasa su salida como si fuera un archivo temporal |
+| **Sustitución de proceso** | Técnica del shell para usar la salida de un comando donde se espera un archivo (`<()`) |
 | **`-k INICIO,FIN` en sort** | Define la clave de ordenamiento: compara desde el campo INICIO hasta el campo FIN — si INICIO=FIN, usa exactamente ese campo |
 | **`-k1,1`** | Ordena usando solo el primer campo (campo 1 a campo 1) — el patrón más común para ordenar por un identificador |
 | **`-k1`** | Ordena desde el campo 1 hasta el final de la línea — más amplio que `-k1,1`, puede dar orden inesperado |
