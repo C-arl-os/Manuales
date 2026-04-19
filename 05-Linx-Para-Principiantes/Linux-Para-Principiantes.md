@@ -26,6 +26,7 @@
   - [Lab 13 — Tuberías, Operadores Condicionales y Procesamiento de Texto](#lab-13--tuberías-operadores-condicionales-y-procesamiento-de-texto)
   - [Lab 14 — Desafío: Procesar Datos de Sensores](#lab-14--desafío-procesar-datos-de-sensores)
   - [Lab 15 — tr, col, join y paste: Transformar y Combinar Texto](#lab-15--tr-col-join-y-paste-transformar-y-combinar-texto)
+  - [Lab 16 — Desafío: Analizar el PATH con tr](#lab-16--desafío-analizar-el-path-con-tr)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
@@ -6029,6 +6030,327 @@ paste -s empleados.txt
 
 # Paso 8
 col -x < /etc/protocols | head -20
+```
+
+</details>
+
+---
+
+### Lab 16 — Desafío: Analizar el PATH con tr
+
+**Escenario:** El desafío pide un script que muestre el PATH completo, luego liste cada directorio en una línea separada, y finalmente cuente cuántos directorios hay en total. El PATH en Linux se almacena como una cadena donde los directorios están separados por `:` — hay que transformar esa cadena con `tr` para hacerla legible y procesable.
+
+---
+
+#### El script completo — autopsia línea por línea
+
+```bash
+#!/bin/bash
+
+# Display the full PATH
+echo "Full PATH:"
+echo "$PATH"
+
+# List each directory in PATH on a separate line
+echo
+echo "Directories in PATH:"
+echo "$PATH" | tr ':' '\n'
+
+# Count the total number of directories in PATH
+echo
+echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+```
+
+---
+
+#### Primera pregunta: ¿por qué `"$PATH"` y no `$PATH` o `'$PATH'`?
+
+Esta es una de las diferencias más importantes del shell, y se repite en todo script real. Hay tres formas de escribirlo y las tres se comportan diferente:
+
+**Opción 1: sin comillas — `$PATH`**
+
+```bash
+echo $PATH
+```
+
+El shell primero expande `$PATH` a su valor (por ejemplo `/usr/bin:/bin:/home/labex/.local/bin`), y luego divide ese valor por espacios. Como el PATH raramente tiene espacios, en la práctica funciona igual. Pero si alguna vez un directorio en el PATH tiene un espacio en su nombre (como `/home/mi usuario/scripts`), el shell lo partiría en dos palabras y el resultado sería incorrecto. No se recomienda para scripts.
+
+**Opción 2: comillas simples — `'$PATH'`**
+
+```bash
+echo '$PATH'
+```
+```
+$PATH
+```
+
+Las comillas simples desactivan **toda** expansión. El shell ve el `$` como un carácter literal, no como inicio de variable. Imprime exactamente `$PATH` — la cadena de texto, no el valor de la variable. Esto es lo que no querías.
+
+**Opción 3: comillas dobles — `"$PATH"` ← la correcta**
+
+```bash
+echo "$PATH"
+```
+```
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/...
+```
+
+Las comillas dobles permiten la expansión de variables (el `$` sigue funcionando) pero protegen contra la división por espacios. El valor completo de `$PATH` se trata como **un solo argumento** aunque contenga espacios. Esta es siempre la forma correcta en scripts.
+
+**La regla de oro para scripts:**
+
+| Cuando quieres | Usa |
+|---------------|-----|
+| El valor de la variable, protegido de división por espacios | `"$VARIABLE"` |
+| El texto literal `$VARIABLE` sin expandir | `'$VARIABLE'` |
+| El valor expandido sin protección (scripts simples, línea de comandos) | `$VARIABLE` |
+
+> Siempre usa `"$VARIABLE"` en scripts. Nunca uses comillas simples cuando necesitas el valor de una variable. El 90% de los bugs silenciosos en scripts de shell vienen de olvidar las comillas dobles.
+
+---
+
+#### Segunda pregunta: ¿por qué `$()` y no simplemente `()`?
+
+```bash
+echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+```
+
+La confusión es natural: si `$VARIABLE` accede a una variable, ¿qué hace `$()`?
+
+**`()` sin el `$` — crea un subshell**
+
+```bash
+(echo "hola")
+```
+
+Esto ejecuta `echo "hola"` en un **subshell** — un proceso hijo aislado. La salida aparece en pantalla (porque el subshell hereda el stdout), pero el resultado no se puede insertar en otro comando. Es útil para agrupar comandos o aislar cambios de directorio, pero no para capturar la salida.
+
+**`$()` con el `$` — sustitución de comando**
+
+```bash
+echo "Hoy es $(date)"
+```
+```
+Hoy es Thu Apr 16 11:00:35 CST 2026
+```
+
+El `$` delante de `()` le dice al shell: "ejecuta esto y **sustituye** `$()` por el resultado". El shell ejecuta el comando adentro, captura su stdout, y pone ese texto en el lugar donde estaba `$()`.
+
+**Visualización de cómo el shell procesa la línea:**
+
+```
+ANTES de ejecutar:
+echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+                                   ↑ el shell ve esto
+
+PASO 1 — ejecuta lo que está dentro de $():
+echo "$PATH" | tr ':' '\n' | wc -l
+→ produce el número 14 (o el que sea)
+
+PASO 2 — sustituye $() por ese resultado:
+echo "Total directories in PATH: 14"
+
+PASO 3 — ejecuta el echo con la línea ya completa:
+Total directories in PATH: 14
+```
+
+Sin el `$`, el shell no sabría que tiene que capturar y sustituir — solo vería paréntesis que agrupan comandos.
+
+**La diferencia en la práctica:**
+
+```bash
+# Con $() — captura el resultado y lo inserta
+echo "Son $(wc -l < /etc/passwd) usuarios"
+# → Son 35 usuarios
+
+# Sin $() — ejecuta el subshell pero no inserta nada
+echo "Son (wc -l < /etc/passwd) usuarios"
+# → Son (wc -l < /etc/passwd) usuarios   ← texto literal
+```
+
+---
+
+#### Desglose del pipeline clave: `echo "$PATH" | tr ':' '\n'`
+
+El PATH tiene este formato:
+```
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/labex/.local/bin
+```
+
+Todo en una línea, separado por `:`. `tr ':' '\n'` transforma cada `:` en un salto de línea real (`\n`):
+
+```
+/usr/local/sbin
+/usr/local/bin
+/usr/sbin
+/usr/bin
+/sbin
+/bin
+/home/labex/.local/bin
+```
+
+Cada directorio queda en su propia línea — exactamente lo que querías mostrar.
+
+**¿Por qué `\n` y no literalmente una nueva línea?**
+
+`tr` acepta secuencias de escape como `\n` (nueva línea), `\t` (tabulación), `\\` (backslash literal). No puedes poner un salto de línea real dentro de las comillas de `tr` — las secuencias de escape son la forma de referirse a esos caracteres invisibles.
+
+---
+
+#### Desglose de la línea del contador
+
+```bash
+echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+```
+
+Paso a paso dentro del `$()`:
+
+```
+echo "$PATH"           → imprime el PATH como cadena: /usr/bin:/bin:/usr/local/bin:...
+      |
+tr ':' '\n'            → convierte cada ':' en salto de línea
+                         resultado: una línea por directorio
+      |
+wc -l                  → cuenta cuántas líneas hay
+                         resultado: el número (ejemplo: 14)
+```
+
+Ese número `14` reemplaza al `$()` en el `echo` exterior, produciendo:
+```
+Total directories in PATH: 14
+```
+
+---
+
+#### Por qué `echo` sin argumento produce una línea vacía
+
+```bash
+echo
+echo "Directories in PATH:"
+```
+
+`echo` sin argumentos imprime exactamente una línea vacía. Es la forma idiomática de añadir una línea en blanco para separar secciones de la salida de un script — más claro que `echo ""` o `printf '\n'`.
+
+---
+
+#### Flujo completo del script
+
+```
+1. echo "Full PATH:"
+   echo "$PATH"
+   → Muestra el PATH completo en una sola línea
+
+2. echo
+   echo "Directories in PATH:"
+   echo "$PATH" | tr ':' '\n'
+   → Convierte ':' en saltos de línea y muestra un directorio por línea
+
+3. echo
+   echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+   → El $() captura la cuenta y la inserta en el mensaje
+```
+
+---
+
+#### Errores frecuentes — Lab 16
+
+**Usar comillas simples alrededor de `$PATH`**
+
+```bash
+echo '$PATH'    # imprime literalmente: $PATH
+echo "$PATH"    # imprime el valor real del PATH
+```
+
+Las comillas simples bloquean toda expansión de variables. Si el script imprime `$PATH` como texto en vez del valor, es este error.
+
+**Olvidar el `$` antes de `()`**
+
+```bash
+echo "Total: (echo $PATH | tr ':' '\n' | wc -l)"
+# Imprime: Total: (echo /usr/bin:... | tr ':' '\n' | wc -l)
+# El shell no ejecutó nada — imprimió todo como texto
+```
+
+Sin el `$`, el shell no reconoce `()` como sustitución de comando.
+
+**`tr ':' '\n'` con comillas simples alrededor de `\n`**
+
+```bash
+echo $PATH | tr ':' '\n'    # correcto — \n se interpreta como nueva línea
+echo $PATH | tr ':' '\''n'  # error tipográfico — intención incorrecta
+```
+
+Dentro de las comillas dobles o simples en `tr`, `\n` siempre se interpreta como salto de línea. No necesitas hacer nada especial.
+
+**`wc -l` cuenta una línea de más si el PATH termina en `:`**
+
+Si el PATH termina en `:` (ej: `/usr/bin:/bin:`), `tr` convierte ese `:` final en un `\n` extra, produciendo una línea vacía al final. `wc -l` la cuenta. En la práctica, los PATHs no terminan en `:`, pero es un edge case a conocer en scripts de producción.
+
+---
+
+#### Ejercicio — Lab 16
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux con bash.
+
+**Tareas:**
+
+1. Crea el script `analizar_path.sh`:
+```bash
+#!/bin/bash
+echo "Full PATH:"
+echo "$PATH"
+echo
+echo "Directories in PATH:"
+echo "$PATH" | tr ':' '\n'
+echo
+echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+```
+
+2. Dale permisos de ejecución: `chmod +x analizar_path.sh`
+3. Ejecútalo: `./analizar_path.sh`
+4. Agrega una sección extra al script que muestre solo los directorios que **existen realmente** usando `while read dir; do [ -d "$dir" ] && echo "$dir"; done`:
+```bash
+echo
+echo "Directorios que existen:"
+echo "$PATH" | tr ':' '\n' | while read dir; do
+  [ -d "$dir" ] && echo "$dir"
+done
+```
+5. Guarda el listado de directorios en un archivo: `echo "$PATH" | tr ':' '\n' > mis_directorios_path.txt`
+6. Usa `wc -l mis_directorios_path.txt` para confirmar el conteo.
+
+<details>
+<summary>Ver solución completa</summary>
+
+```bash
+# Crear el script
+cat << 'EOF' > analizar_path.sh
+#!/bin/bash
+
+echo "Full PATH:"
+echo "$PATH"
+
+echo
+echo "Directories in PATH:"
+echo "$PATH" | tr ':' '\n'
+
+echo
+echo "Total directories in PATH: $(echo "$PATH" | tr ':' '\n' | wc -l)"
+
+echo
+echo "Directorios que existen:"
+echo "$PATH" | tr ':' '\n' | while read dir; do
+  [ -d "$dir" ] && echo "$dir"
+done
+EOF
+
+# Dar permisos y ejecutar
+chmod +x analizar_path.sh
+./analizar_path.sh
+
+# Guardar el listado
+echo "$PATH" | tr ':' '\n' > mis_directorios_path.txt
+wc -l mis_directorios_path.txt
 ```
 
 </details>
