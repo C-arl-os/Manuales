@@ -27,9 +27,11 @@
   - [Lab 14 — Desafío: Procesar Datos de Sensores](#lab-14--desafío-procesar-datos-de-sensores)
   - [Lab 15 — tr, col, join y paste: Transformar y Combinar Texto](#lab-15--tr-col-join-y-paste-transformar-y-combinar-texto)
   - [Lab 16 — Desafío: Analizar el PATH con tr](#lab-16--desafío-analizar-el-path-con-tr)
+  - [Lab 17 — Redirección: stdin, stdout y stderr](#lab-17--redirección-stdin-stdout-y-stderr)
 - [Referencia Rápida](#referencia-rápida)
 - [Errores Humanos Frecuentes](#errores-humanos-frecuentes)
 - [Glosario](#glosario)
+- [Guía por Problema](#guía-por-problema)
 
 ---
 
@@ -6357,6 +6359,420 @@ wc -l mis_directorios_path.txt
 
 ---
 
+### Lab 17 — Redirección: stdin, stdout y stderr
+
+**Escenario:** Cada vez que un programa Linux corre, tiene tres canales abiertos: uno por donde recibe datos, uno por donde escribe resultados, y uno por donde escribe errores. Por defecto, los tres están conectados a la terminal — lees del teclado, escribes a la pantalla. La redirección te permite cambiar ese destino: guardar resultados en archivos, separar errores de resultados, o descartar ruido sin perder lo que importa.
+
+> Dominar la redirección es lo que separa usar Linux de verdad administrarlo. Casi cualquier script de producción usa redirección para logging, manejo de errores y procesamiento en segundo plano.
+
+---
+
+#### Los tres canales de todo proceso Linux
+
+Cuando Linux arranca un programa, le abre automáticamente tres "canales" de comunicación llamados **descriptores de archivo**. Son simplemente números que identifican conexiones abiertas:
+
+| Número | Nombre | Nombre en inglés | Dispositivo por defecto | Qué fluye por él |
+|--------|--------|-----------------|------------------------|-----------------|
+| **0** | Entrada estándar | stdin | `/dev/stdin` (teclado) | Los datos que el programa lee |
+| **1** | Salida estándar | stdout | `/dev/stdout` (pantalla) | Los resultados normales del programa |
+| **2** | Error estándar | stderr | `/dev/stderr` (pantalla) | Los mensajes de error del programa |
+
+**¿Por qué stdout y stderr son canales separados si ambos van a la pantalla?**
+
+Porque te permiten tratarlos de forma diferente. En una terminal interactiva no lo notas — ambos aparecen en pantalla mezclados. Pero en scripts y automatización puedes:
+- Guardar solo los resultados en un archivo de log
+- Guardar solo los errores en un archivo de errores
+- Descartar los errores y quedarte solo con los resultados
+- Combinarlos en un solo archivo
+
+Sin esa separación, un error en medio de una salida larga contaminaría los datos y haría que los scripts fallaran silenciosamente.
+
+---
+
+#### `>` — Redirigir stdout (sobreescribir)
+
+```bash
+echo 'hello labex' > redirect
+```
+
+El `>` desconecta stdout de la pantalla y lo conecta al archivo `redirect`. Si el archivo no existe, lo crea. Si ya existe, lo **sobreescribe completamente** — el contenido anterior se pierde sin advertencia.
+
+```bash
+cat redirect
+```
+```
+hello labex
+```
+
+**Verificación:** El texto no apareció en pantalla — fue al archivo.
+
+**En campo real:** Guardar el resultado de un comando en un archivo de log, capturar la salida de un proceso largo, generar archivos de configuración.
+
+---
+
+#### `>>` — Redirigir stdout (agregar al final)
+
+```bash
+echo 'labex.io' >> redirect
+cat redirect
+```
+```
+hello labex
+labex.io
+```
+
+`>>` agrega al final del archivo en vez de sobreescribirlo. Si el archivo no existe, lo crea igual que `>`. Si ya existe, el contenido anterior se conserva y el nuevo texto se agrega después.
+
+**La diferencia crítica `>` vs `>>`:**
+
+| Operador | Si el archivo existe | Si no existe |
+|----------|---------------------|-------------|
+| `>` | **Sobreescribe** — borra todo el contenido | Crea el archivo |
+| `>>` | **Agrega al final** — conserva el contenido | Crea el archivo |
+
+**En campo real:** Acumular logs a lo largo del tiempo, agregar entradas a un registro sin perder el historial. La regla: usa `>` cuando quieres un resultado limpio cada vez, usa `>>` cuando quieres conservar el historial.
+
+---
+
+#### `cat > archivo << EOF` — Here-document con redirección
+
+```bash
+cat > Documents/test.c << EOF
+#include <stdio.h>
+
+int main()
+{
+    printf("hello world\n");
+    return 0;
+}
+EOF
+```
+
+Este comando combina dos cosas que ya conoces:
+- `cat >` redirige la salida de cat al archivo `Documents/test.c`
+- `<< EOF` le da a cat su entrada desde el here-document (el texto entre `EOF` y `EOF`)
+
+El flujo es: el here-document es la **entrada** de cat, y cat redirige esa entrada al archivo. Es la forma compacta de crear un archivo multilínea en un solo bloque de comandos.
+
+```bash
+cat Documents/test.c
+```
+```
+#include <stdio.h>
+
+int main()
+{
+    printf("hello world\n");
+    return 0;
+}
+```
+
+---
+
+#### stdout y stderr mezclados en pantalla
+
+```bash
+cat Documents/test.c nonexistente.c
+```
+```
+#include <stdio.h>
+
+int main()
+{
+    printf("hello world\n");
+    return 0;
+}
+cat: nonexistente.c: No such file or directory
+```
+
+`cat` procesa dos archivos. El primero existe → su contenido va a **stdout** (pantalla). El segundo no existe → el error va a **stderr** (también pantalla). Ambos aparecen mezclados en la terminal, pero internamente viajan por canales separados.
+
+---
+
+#### `2>` — Redirigir stderr a un archivo separado
+
+```bash
+cat Documents/test.c nonexistente.c > output.log 2> error.log
+```
+
+Aquí se usan dos redirecciones simultáneamente:
+- `> output.log` — stdout (canal 1) va al archivo `output.log`
+- `2> error.log` — stderr (canal 2) va al archivo `error.log`
+
+El `2` delante del `>` es el número del descriptor de archivo. Sin número, `>` asume canal 1 (stdout).
+
+**Verificar los resultados:**
+```bash
+cat output.log
+```
+```
+#include <stdio.h>
+
+int main()
+{
+    printf("hello world\n");
+    return 0;
+}
+```
+
+```bash
+cat error.log
+```
+```
+cat: nonexistente.c: No such file or directory
+```
+
+Los resultados y errores quedaron perfectamente separados. En producción esto es esencial: el archivo de log tiene solo la salida limpia, y el archivo de errores tiene solo los problemas — puedes analizar cada uno por separado.
+
+---
+
+#### `2>&1` — Combinar stderr dentro de stdout
+
+```bash
+ls -l . nonexistent_directory > combined_output.log 2>&1
+```
+
+Esta sintaxis dirige **ambos canales al mismo destino**:
+1. `> combined_output.log` — redirige stdout (canal 1) al archivo
+2. `2>&1` — redirige stderr (canal 2) a donde va el canal 1 en este momento, es decir, al archivo
+
+```bash
+cat combined_output.log
+```
+```
+ls: cannot access 'nonexistent_directory': No such file or directory
+.:
+total 16
+-rw-rw-r-- 1 labex labex 69 Apr 19 12:13 combined_output.log
+drwxrwxr-x 2 labex labex 20 Apr 19 12:09 Documents
+...
+```
+
+El error (`ls: cannot access...`) y el listado normal aparecen juntos en el mismo archivo.
+
+**Cómo leer `2>&1`:**
+
+> "Redirige el descriptor de archivo 2 (stderr) al mismo destino que el descriptor de archivo 1 (stdout)."
+>
+> El `&1` significa "el descriptor número 1" — sin el `&`, el shell interpretaría `1` como el nombre de un archivo llamado `1`.
+
+**El orden importa — error clásico:**
+
+```bash
+# CORRECTO — primero redirige stdout, luego apunta stderr al mismo lugar
+comando > archivo.log 2>&1
+
+# INCORRECTO — stderr se redirige a la pantalla (donde stdout estaba ANTES),
+# luego stdout se redirige al archivo
+comando 2>&1 > archivo.log
+```
+
+Si pones `2>&1` antes de `>`, stderr queda apuntando a la pantalla (el destino original de stdout) y solo stdout va al archivo. El orden correcto es siempre: primero `>`, luego `2>&1`.
+
+---
+
+#### `&>` — Atajo de bash para combinar ambos canales
+
+```bash
+ls -l . nonexistent_directory &> another_combined_output.log
+```
+
+`&>` es una abreviación de Bash que equivale exactamente a `> archivo 2>&1`. Es más corto de escribir y más fácil de recordar.
+
+**Comparativa de las tres formas:**
+
+| Sintaxis | Qué hace | Compatibilidad |
+|----------|---------|---------------|
+| `> archivo 2>&1` | Combina stdout y stderr en el archivo | Universal — funciona en bash, zsh, sh |
+| `&> archivo` | Lo mismo, forma corta | Solo bash y zsh — no funciona en sh básico |
+| `2> error.log` | Solo stderr al archivo (stdout sigue en pantalla) | Universal |
+
+En scripts que empiezan con `#!/bin/bash` puedes usar `&>`. En scripts con `#!/bin/sh` usa la forma larga.
+
+---
+
+#### `/dev/null` — El agujero negro de Linux
+
+```bash
+ls -l > /dev/null
+```
+
+`/dev/null` es un dispositivo especial que descarta todo lo que se escribe en él. No crea ningún archivo, no ocupa espacio — la información simplemente desaparece.
+
+**Usos del lab:**
+
+```bash
+# Silenciar la salida normal completamente
+ls -l > /dev/null
+
+# Silenciar TODO — stdout y stderr
+ls -l nonexistent_directory > /dev/null 2>&1
+
+# grep sobre /dev/null — siempre vacío, útil como referencia vacía en scripts
+grep "pattern" /dev/null
+
+# Probar si un archivo es legible, sin salida visible
+if cp Documents/test.c /dev/null 2> /dev/null; then
+  echo "File exists and is readable"
+else
+  echo "File does not exist or is not readable"
+fi
+```
+
+**Por qué `cp archivo /dev/null` prueba si el archivo es legible:**
+
+`cp` intenta leer el archivo y escribir su contenido en el destino. Si el archivo no existe o no se puede leer, `cp` falla con código de salida distinto de 0. Si tiene éxito, el código de salida es 0. Como el destino es `/dev/null`, no se escribe nada a ningún lado — solo nos importa el código de salida para el `if`.
+
+**Usos reales de `/dev/null`:**
+
+```bash
+# Ejecutar un proceso sin ver su salida en pantalla
+make build > /dev/null 2>&1
+
+# Suprimir mensajes de error de find (sin permiso a ciertos directorios)
+find / -name "archivo" 2>/dev/null
+
+# Vaciar un archivo de log sin borrarlo (conserva el inodo)
+cat /dev/null > access.log
+> access.log    # atajo equivalente
+
+# Hacer que un comando no produzca salida pero sí devuelva código de salida
+which tree > /dev/null && echo "tree está instalado"
+```
+
+---
+
+#### `cat /dev/null > archivo` — Vaciar un archivo
+
+```bash
+cat /dev/null > combined_output.log
+cat combined_output.log
+```
+```
+(vacío)
+```
+
+`cat /dev/null` produce salida vacía (leer de la papelera da nada), y `>` sobreescribe el archivo con esa nada. El resultado: el archivo existe pero tiene 0 bytes.
+
+**¿Por qué vaciar en vez de borrar?**
+
+En producción, a menudo los archivos de log tienen **procesos que siguen escribiendo en ellos** (nginx, apache, syslog). Si borras el archivo con `rm`, el proceso sigue escribiendo al inodo original — el archivo "fantasma" sigue ocupando espacio aunque no lo veas con `ls`. Si en cambio lo vacías con `cat /dev/null > access.log` o `> access.log`, el proceso sigue usando el mismo inodo (ahora vacío) sin interrupciones.
+
+---
+
+#### Mapa completo de redirección
+
+```
+Entrada al programa:
+  comando < archivo         → stdin viene del archivo en vez del teclado
+  comando << EOF            → stdin viene del here-document
+
+Salida del programa:
+  comando > archivo         → stdout va al archivo (sobreescribe)
+  comando >> archivo        → stdout va al archivo (agrega al final)
+  comando 2> error.log      → stderr va al archivo de errores
+  comando > out 2> err      → stdout y stderr a archivos separados
+  comando > archivo 2>&1    → stdout y stderr al mismo archivo
+  comando &> archivo        → lo mismo (atajo de bash)
+  comando > /dev/null       → descartar stdout
+  comando > /dev/null 2>&1  → descartar todo (silencio total)
+```
+
+---
+
+#### Errores frecuentes — Lab 17
+
+**`>` cuando querías `>>`**
+
+El error más común y el más costoso. Si sobreescribes accidentalmente un archivo de log importante, su contenido anterior se pierde permanentemente. Antes de usar `>`, pregúntate: ¿quiero empezar de cero o conservar lo anterior?
+
+**`comando 2>&1 > archivo` — el orden incorrecto**
+
+```bash
+# INCORRECTO — stderr va a la pantalla, stdout va al archivo
+ls nonexistente 2>&1 > log.txt
+
+# CORRECTO — ambos van al archivo
+ls nonexistente > log.txt 2>&1
+```
+
+`2>&1` redirige stderr al destino **actual** de stdout en el momento de evaluarse. Si se evalúa antes de `> archivo`, el destino actual de stdout todavía es la pantalla.
+
+**Confundir `>` (redirección) con `|` (tubería)**
+
+```bash
+ls | grep ".txt"    # pipe: conecta stdout de ls con stdin de grep
+ls > archivo.txt    # redirección: stdout de ls va al archivo
+```
+
+`|` conecta la salida de un comando con la entrada del siguiente. `>` conecta la salida con un archivo. No son intercambiables.
+
+**`cat /dev/null` para leer en vez de vaciar**
+
+```bash
+cat /dev/null         # imprime nada — salida vacía (esto está bien si quieres vacío)
+cat /dev/null > log   # vacía el archivo log ← el uso correcto del lab
+```
+
+`cat /dev/null` por sí solo no hace nada útil — necesita la redirección `>` para vaciar el archivo destino.
+
+---
+
+#### Ejercicio — Lab 17
+
+**Entorno:** KillerCoda (Ubuntu) o cualquier Linux.
+
+**Preparación:**
+```bash
+mkdir -p ~/redir_test
+cd ~/redir_test
+echo "línea 1" > datos.txt
+echo "línea 2" > datos.txt   # ← ¿qué tiene datos.txt ahora?
+echo "línea 3" >> datos.txt  # ← ¿y ahora?
+```
+
+**Tareas:**
+
+1. Verifica el contenido de `datos.txt` — ¿cuántas líneas tiene? ¿Por qué?
+2. Guarda el listado de `/etc` en `lista_etc.txt` y los errores de `/etc/shadow` (que no puedes leer sin sudo) en `errores_etc.txt`, con un solo comando.
+3. Combina stdout y stderr de `ls /tmp /noexiste` en un solo archivo `combinado.txt`.
+4. Ejecuta `find / -name "*.conf" 2>/dev/null | head -5` y explica qué hace el `2>/dev/null` aquí.
+5. Vacía `combinado.txt` sin borrarlo.
+6. Verifica que `combinado.txt` existe pero está vacío con `ls -lh combinado.txt`.
+
+<details>
+<summary>Ver solución</summary>
+
+```bash
+# Paso 1 — datos.txt tiene 2 líneas porque > sobreescribió la línea 1
+cat datos.txt
+# línea 2
+# línea 3
+
+# Paso 2
+ls /etc > lista_etc.txt 2> errores_etc.txt
+
+# Paso 3
+ls /tmp /noexiste > combinado.txt 2>&1
+cat combinado.txt
+
+# Paso 4 — 2>/dev/null descarta los "Permission denied" de directorios sin acceso
+find / -name "*.conf" 2>/dev/null | head -5
+
+# Paso 5
+cat /dev/null > combinado.txt
+# o simplemente:
+> combinado.txt
+
+# Paso 6
+ls -lh combinado.txt
+# -rw-rw-r-- 1 labex labex 0 ...   ← 0 bytes
+```
+
+</details>
+
+---
+
 ## Referencia Rápida
 
 | Comando | Descripción breve | Lab |
@@ -6493,6 +6909,17 @@ wc -l mis_directorios_path.txt
 | `sort \| uniq -d` | Muestra solo las líneas que tienen al menos un duplicado | 13 |
 | `sort \| uniq -u` | Muestra solo las líneas completamente únicas | 13 |
 | `sort -k1,1` | Ordena usando solo el campo 1 como clave (inicio,fin del campo) | 14 |
+| `comando > archivo` | Redirige stdout al archivo (crea o sobreescribe) | 17 |
+| `comando >> archivo` | Redirige stdout al archivo (agrega al final, conserva contenido) | 17 |
+| `comando 2> error.log` | Redirige solo stderr al archivo de errores | 17 |
+| `comando > out.log 2> err.log` | Redirige stdout y stderr a archivos separados | 17 |
+| `comando > archivo 2>&1` | Redirige stdout y stderr al mismo archivo | 17 |
+| `comando &> archivo` | Atajo bash: redirige stdout y stderr juntos (equivale a `> archivo 2>&1`) | 17 |
+| `comando > /dev/null` | Descarta stdout (silencia la salida normal) | 17 |
+| `comando > /dev/null 2>&1` | Descarta toda salida — stdout y stderr (silencio total) | 17 |
+| `cat /dev/null > archivo` | Vacía el archivo sin borrarlo (deja el archivo con 0 bytes) | 17 |
+| `> archivo` | Atajo para vaciar un archivo (equivale a `cat /dev/null > archivo`) | 17 |
+| `comando < archivo` | Redirige stdin desde un archivo en vez del teclado | 17 |
 | `sort -k2,2n` | Ordena numéricamente por el campo 2 exactamente | 14 |
 | `grep "patron" archivo \| sort -k1,1 \| uniq > resultado` | Pipeline completo: filtrar → ordenar → deduplicar → guardar | 14 |
 | `echo "texto" \| tr 'ab' 'AB'` | Reemplaza 'a'→'A' y 'b'→'B' (mapeo carácter por carácter) | 15 |
@@ -6549,237 +6976,603 @@ Esta sección recopila los errores más comunes al usar Linux como principiante.
 
 ## Glosario
 
-| Término | Definición |
-|---------|-----------|
-| **Terminal** | Interfaz de texto para dar comandos al sistema operativo |
-| **Shell** | Intérprete que lee los comandos que escribes y los ejecuta — el más común es Bash |
-| **Bash** | Bourne Again Shell — el shell por defecto en la mayoría de distribuciones Linux |
-| **Comando** | Instrucción que le das al sistema — puede ser un programa (`ls`) o una función del shell (`cd`) |
-| **Flag / Opción** | Modificador de un comando — cambia su comportamiento. Ej: `ls -l` (la `-l` es una flag) |
-| **Argumento** | Dato que le pasas al comando para que trabaje con él. Ej: `rm archivo.txt` |
-| **Ruta absoluta** | Ruta que empieza desde la raíz `/` — siempre funciona sin importar dónde estés |
-| **Ruta relativa** | Ruta desde el directorio actual — depende de dónde estés en el sistema |
-| **`~`** | Atajo para el directorio home del usuario actual (`/home/usuario`) |
-| **`.`** | El directorio actual |
-| **`..`** | El directorio padre (un nivel arriba) |
-| **`/`** | La raíz del sistema de archivos — el punto de partida de toda ruta absoluta |
-| **Pipe `\|`** | Operador que conecta comandos: la salida del primero se convierte en la entrada del segundo |
-| **Stdin** | Entrada estándar — de dónde lee datos un programa (normalmente el teclado) |
-| **Stdout** | Salida estándar — a dónde escribe resultados un programa (normalmente la pantalla) |
-| **Stderr** | Salida de error — canal separado para mensajes de error |
-| **Proceso** | Programa en ejecución — tiene un PID único |
-| **Root** | Superusuario con acceso total al sistema |
-| **`sudo`** | Ejecuta un comando con privilegios de root |
-| **Permiso** | Control de acceso a archivos — lectura (r), escritura (w), ejecución (x) |
-| **Distribución** | Versión empaquetada de Linux — Ubuntu, Debian, Fedora, etc. |
-| **Kernel** | Núcleo del SO — gestiona hardware, memoria y procesos |
-| **`/etc`** | Directorio de configuración del sistema |
-| **`/var/log`** | Directorio donde se guardan los logs del sistema |
-| **`/home`** | Directorio que contiene los homes de todos los usuarios |
-| **`/tmp`** | Directorio para archivos temporales — se limpia al reiniciar |
-| **`echo`** | Comando que imprime texto en la terminal — base de todos los mensajes en scripts |
-| **`date`** | Muestra la fecha y hora del sistema — también genera cadenas formateadas para scripts |
-| **`cal`** | Muestra un calendario en la terminal — con el día actual resaltado |
-| **`expr`** | Evalúa expresiones aritméticas enteras directamente en la terminal |
-| **`figlet`** | Genera arte ASCII a partir de texto — usado en banners de scripts y mensajes de bienvenida |
-| **`clear`** | Limpia la pantalla de la terminal sin borrar el historial de comandos |
-| **`Ctrl + L`** | Atajo de teclado equivalente a `clear` |
-| **Prompt** | El símbolo `$` que indica que la terminal está lista para recibir un nuevo comando |
-| **Arte ASCII** | Representación de texto o imágenes usando solo caracteres de texto |
-| **Unix timestamp** | Número de segundos transcurridos desde el 1 de enero de 1970 — base del tiempo en sistemas Unix |
-| **Epoch** | El momento de referencia del tiempo Unix: `1970-01-01 00:00:00 UTC` |
-| **`/etc/motd`** | Message Of The Day — texto que se muestra al iniciar sesión en un servidor |
-| **`pwd`** | Print Working Directory — muestra la ruta absoluta del directorio actual |
-| **Directorio de trabajo** | El directorio desde donde se ejecutan tus comandos en este momento |
-| **`cd`** | Change Directory — cambia el directorio de trabajo |
-| **`ls`** | List — lista el contenido de un directorio |
-| **`mkdir`** | Make Directory — crea uno o más directorios |
-| **`touch`** | Crea un archivo vacío o actualiza la fecha de modificación de uno existente |
-| **`cp`** | Copy — copia archivos o directorios |
-| **`mv`** | Move — mueve o renombra archivos y directorios |
-| **`rm`** | Remove — elimina archivos o directorios (sin papelera) |
-| **Comodín (wildcard)** | Patrón que el shell expande antes de ejecutar el comando — `*`, `?`, `[]` |
-| **`*`** | Comodín que representa cualquier cantidad de caracteres |
-| **`?`** | Comodín que representa exactamente un carácter |
-| **Expansión de llaves** | Sintaxis `{1..5}` o `{a,b,c}` que el shell expande en una lista antes de ejecutar |
-| **`man`** | Manual — muestra la documentación completa de un comando |
-| **`--help`** | Flag que muestra la ayuda rápida de un comando |
-| **`/dev/null`** | Dispositivo especial que descarta todo lo que se escribe en él — siempre vacío |
-| **`Ctrl+C`** | Atajo para interrumpir (cancelar) el proceso que se está ejecutando |
-| **`tail -f`** | Sigue un archivo en tiempo real mostrando nuevas líneas conforme aparecen |
-| **`type`** | Revela la naturaleza de un comando: built-in, externo o alias |
-| **Built-in** | Comando integrado en el shell — no existe como archivo en el disco |
-| **Comando externo** | Programa independiente en el disco — generalmente en `/usr/bin/` o `/bin/` |
-| **Alias** | Nombre alternativo para un comando, usualmente definido en `~/.bashrc` |
-| **`man`** | Manual de Linux — documentación técnica completa de comandos, archivos y llamadas al sistema |
-| **`man pages`** | Las páginas del manual de Linux — escritas en formato específico para el comando `man` |
-| **Sección de `man`** | Número del 1 al 9 que clasifica el tipo de documentación (1=comandos, 5=archivos, 8=admin) |
-| **`apropos`** | Busca en los títulos y descripciones de todas las páginas man instaladas |
-| **`mandb`** | Base de datos de páginas man — se reconstruye con `sudo mandb` |
-| **SYNOPSIS en man** | Sección que muestra la sintaxis completa del comando con todos sus argumentos posibles |
-| **SEE ALSO en man** | Sección que lista comandos relacionados — útil para descubrir herramientas similares |
-| **UID** | User ID — número único que identifica a un usuario en el sistema |
-| **GID** | Group ID — número único que identifica a un grupo en el sistema |
-| **Grupo primario** | Grupo creado automáticamente con el mismo nombre del usuario — aparece en los archivos que crea |
-| **Grupo secundario** | Grupo adicional al que se agrega un usuario para darle acceso a recursos compartidos |
-| **`/etc/group`** | Archivo que almacena la definición de todos los grupos del sistema |
-| **`/etc/skel`** | Directorio con los archivos base que se copian al home de cada usuario nuevo |
-| **`adduser`** | Comando interactivo de Debian/Ubuntu para crear usuarios — más amigable que `useradd` |
-| **`useradd`** | Comando universal (bajo nivel) para crear usuarios — ideal para scripts |
-| **`groupadd`** | Crea un nuevo grupo en el sistema |
-| **`usermod`** | Modifica la configuración de un usuario existente |
-| **`-aG`** | Flags de usermod: Append + Groups — agrega grupos sin eliminar los existentes |
-| **`chown`** | Change Owner — cambia el usuario y/o grupo dueño de un archivo |
-| **`chmod`** | Change Mode — cambia los permisos de acceso de un archivo o directorio |
-| **Permisos rwx** | r=leer(4), w=escribir(2), x=ejecutar(1) — se suman para formar el número de permisos |
-| **Notación numérica** | Forma de expresar permisos con 3 dígitos: ej. `750` = `rwxr-x---` |
-| **Dueño (owner)** | El usuario propietario del archivo — controla quién puede cambiarlo |
-| **`sudo`** | Permite ejecutar comandos con privilegios de root — solo usuarios del grupo `sudo` pueden usarlo |
-| **`useradd`** | Herramienta de bajo nivel para crear usuarios — universal en todas las distros, ideal para scripts |
-| **`-m` en useradd** | Flag que crea el directorio home del usuario si no existe |
-| **`-d` en useradd** | Flag que especifica la ruta exacta del directorio home |
-| **`-g` (minúscula)** | Establece el grupo **primario** del usuario — uno solo, el que firman los archivos que crea |
-| **`-G` (mayúscula)** | Establece los grupos **secundarios** — pueden ser varios, separados por coma |
-| **`-s` en useradd** | Especifica el shell por defecto del usuario (ej. `/bin/bash`) |
-| **Grupo primario** | El grupo que hereda cada archivo nuevo creado por el usuario |
-| **Grupo secundario** | Grupos adicionales para dar acceso a recursos — no afecta la propiedad de archivos nuevos |
-| **FHS** | Filesystem Hierarchy Standard — estándar que define la estructura de directorios de Linux |
-| **Enlace simbólico** | Acceso directo a otro archivo o directorio — la `l` al inicio en `ls -l`, ej. `bin -> usr/bin` |
-| **Sticky bit** | Permiso especial (`t` al final) en `/tmp` — cualquiera puede crear archivos pero no borrar los ajenos |
-| **`/proc`** | Sistema de archivos virtual — no existe en disco, el kernel lo genera en tiempo real con info de procesos |
-| **`/etc`** | Directorio de configuración del sistema — todo lo que configura cómo funciona Linux |
-| **`/var/log`** | Donde viven los logs del sistema — nginx, syslog, auth, etc. |
-| **`tree`** | Muestra la jerarquía de directorios en forma visual de árbol |
-| **Here-document** | Sintaxis `<< EOF ... EOF` para escribir texto multilínea directamente en la terminal |
-| **`EOF`** | End Of File — la palabra que cierra un here-document (puede ser cualquier palabra) |
-| **`nl`** | Number Lines — muestra el contenido de un archivo con números de línea |
-| **`find`** | Herramienta de búsqueda que recorre el sistema de archivos aplicando criterios |
-| **`-name "*.txt"`** | Criterio de find: busca por nombre usando comodines |
-| **`-mtime -N`** | Criterio de find: archivos modificados en los últimos N días |
-| **`-size +NM`** | Criterio de find: archivos de más de N megabytes |
-| **`which`** | Localiza el ejecutable que se invocaría al escribir un comando |
-| **`nano`** | Editor de texto de terminal — muestra los atajos en la barra inferior |
-| **`2>/dev/null`** | Redirige stderr (mensajes de error) a la papelera — limpia la salida |
-| **Variable de shell** | Variable local al proceso de shell actual — no se hereda por procesos hijos |
-| **Variable de entorno** | Variable marcada con `export` — se hereda automáticamente por todos los procesos hijos |
-| **`export`** | Marca una variable para que sea heredada por procesos hijos |
-| **`PATH`** | Variable de entorno con los directorios donde el shell busca ejecutables |
-| **Proceso hijo** | Proceso lanzado por otro proceso (el padre) — hereda las variables de entorno del padre |
-| **`source`** | Ejecuta un archivo en el contexto del shell actual — aplica cambios de configuración sin reiniciar |
-| **`~/.bashrc`** | Archivo de configuración de Bash — se ejecuta al abrir cada terminal interactiva |
-| **`~/.zshrc`** | Archivo de configuración de Zsh — equivalente al `.bashrc` para el shell Zsh |
-| **`unset`** | Elimina una variable del entorno de la sesión actual |
-| **`env`** | Muestra todas las variables de entorno del proceso actual |
-| **`$HOME`** | Variable integrada con el directorio home del usuario |
-| **`$USER`** | Variable integrada con el nombre del usuario actual |
-| **`$SHELL`** | Variable integrada con la ruta del shell activo |
-| **`$OLDPWD`** | Directorio anterior — es lo que usa `cd -` internamente |
-| **`<< 'EOF'`** | Here-document con expansión desactivada — las variables no se expanden al escribir el archivo |
-| **`<< EOF`** | Here-document normal — las variables se expanden mientras se escribe el archivo |
-| **Empaquetar** | Unir múltiples archivos en uno solo sin reducir tamaño — lo hace `tar` |
-| **Comprimir** | Reducir el tamaño de un archivo mediante algoritmos — lo hacen `gzip`, `bzip2`, `xz` |
-| **`tar`** | Tape Archive — herramienta de empaquetado que conserva estructura, permisos y metadatos |
-| **`.tar`** | Archivo empaquetado sin compresión — puede ser más grande que los originales |
-| **`.tar.gz`** | Archivo empaquetado con `tar` y comprimido con `gzip` — el formato más común en Linux |
-| **`.tar.bz2`** | Empaquetado con tar y comprimido con bzip2 — mejor compresión, más lento que gzip |
-| **`.tar.xz`** | Empaquetado con tar y comprimido con xz — la mejor compresión, el más lento |
-| **`gzip`** | GNU Zip — compresor de archivos individuales, muy usado en Linux |
-| **`zip`** | Formato de compresión y empaquetado con mejor compatibilidad en Windows y macOS |
-| **`-z` en tar** | Flag que activa la compresión gzip — equivale a hacer tar y gzip en un solo paso |
-| **`-C` en tar** | Cambia al directorio indicado antes de operar — controla dónde se extraen los archivos |
-| **Bloque de disco** | Unidad mínima de almacenamiento — un archivo pequeño puede ocupar 4KB aunque tenga solo 1 byte |
-| **`du`** | Disk Usage — mide el espacio real que ocupa en disco un archivo o directorio |
-| **`stored 0%`** | En zip: el archivo se guarda sin comprimir porque es demasiado pequeño para beneficiarse |
-| **`deflated N%`** | En zip: el archivo se comprimió un N% respecto a su tamaño original |
-| **`df`** | Disk Free — muestra el espacio usado y libre en cada filesystem montado |
-| **`du`** | Disk Usage — mide cuánto espacio en disco ocupa un directorio y su contenido |
-| **Filesystem** | La estructura que organiza los datos en un disco — define cómo se guardan y recuperan archivos |
-| **ext2** | Second Extended Filesystem (1993) — el primer filesystem estable de Linux, sin journaling |
-| **ext3** | Third Extended Filesystem (2001) — añade journaling a ext2, evita corrupción ante cortes de luz |
-| **ext4** | Fourth Extended Filesystem (2008) — el estándar actual en Linux, soporta archivos hasta 16TB, usa extents |
-| **Journaling** | Técnica de los filesystems modernos: escribe en una bitácora qué va a hacer antes de hacerlo, garantizando consistencia ante fallos |
-| **Journal** | La bitácora interna del filesystem donde se registran las operaciones antes de ejecutarlas |
-| **Extent** | Rango contiguo de bloques descrito con un solo registro — en ext4 reemplaza la lista bloque-a-bloque de ext3 |
-| **Inode** | Ficha técnica de un archivo: guarda dueño, permisos, fechas y bloques del disco, pero NO el nombre |
-| **Superbloque** | Estructura crítica del filesystem que contiene su estado global: tamaño, inodes libres, bloques libres |
-| **`lost+found`** | Directorio especial en ext4 donde `fsck` deposita archivos rescatados cuyo nombre se perdió por corrupción |
-| **`fsck`** | File System Check — herramienta de reparación de filesystems, equivalente al "chkdsk" de Windows |
-| **Montaje** | El proceso de conectar un filesystem a un punto del árbol de directorios para hacerlo accesible |
-| **Punto de montaje** | El directorio donde "aterriza" el contenido de un disco al montarlo |
-| **`/mnt`** | Convención para montajes temporales — es el lugar habitual para montar discos manualmente |
-| **`/media`** | Convención para dispositivos externos (USB, DVD) — muchos sistemas montan aquí automáticamente |
-| **`/etc/fstab`** | Archivo de configuración que define qué filesystems se montan automáticamente al arrancar |
-| **UUID** | Universally Unique Identifier — identificador único del filesystem, más confiable que el nombre del dispositivo |
-| **`dd`** | Disk Dump — copia datos bloque a bloque entre dispositivos o archivos, sin ninguna capa de abstracción |
-| **`/dev/zero`** | Dispositivo especial que produce ceros indefinidamente — usado para crear archivos de tamaño fijo |
-| **Loop device** | Dispositivo virtual (`/dev/loop0`) que hace que un archivo se comporte como un disco físico |
-| **`-o loop`** | Opción de `mount` que crea automáticamente un loop device para montar un archivo de imagen |
-| **`mkfs.ext4`** | Make Filesystem — formatea un dispositivo o archivo con el sistema de archivos ext4 |
-| **Partición** | División lógica de un disco físico — cada partición tiene su propio filesystem y se monta independientemente |
-| **Tabla de particiones** | Estructura al inicio del disco que define cuántas particiones hay y sus posiciones |
-| **`fdisk`** | Herramienta para ver y modificar tablas de particiones en discos de estilo MBR |
-| **MBR** | Master Boot Record — esquema de particionado clásico, soporta hasta 4 particiones primarias y discos de hasta 2TB |
-| **GPT** | GUID Partition Table — esquema moderno que reemplaza a MBR, soporta más particiones y discos mayores a 2TB |
-| **`/dev/sda`** | Primer disco SATA/SAS del sistema — `b`, `c`... para discos adicionales |
-| **`/dev/nvme0n1`** | Primer disco NVMe — los SSD modernos de alta velocidad conectados directamente a PCIe |
-| **`/dev/vda`** | Disco virtual en máquinas virtuales (KVM, VirtualBox, cloud) |
-| **Swap** | Partición o archivo usado como extensión de la RAM — el sistema mueve páginas de memoria aquí cuando la RAM se llena |
-| **`lsof`** | List Open Files — lista todos los archivos que los procesos tienen abiertos actualmente |
-| **Buffer de escritura** | Área en RAM donde el kernel acumula escrituras antes de enviarlas al disco — mejora rendimiento |
-| **`sort -h`** | Flag de sort para ordenar correctamente valores con sufijos humanos (K, M, G) |
-| **`sort -r`** | Flag de sort para ordenar en orden inverso (mayor a menor) |
-| **`&&`** | Operador AND lógico — ejecuta el segundo comando solo si el primero tiene éxito (exit code 0) |
-| **`\|\|`** | Operador OR lógico — ejecuta el segundo comando solo si el primero falla (exit code ≠ 0) |
-| **`\|` (pipe)** | Tubería — conecta la salida estándar de un comando con la entrada estándar del siguiente |
-| **Código de salida** | Número que devuelve cada programa al terminar — 0 = éxito, cualquier otro = algún tipo de error |
-| **`$?`** | Variable especial que guarda el código de salida del último comando |
-| **`cut`** | Extrae columnas específicas de texto estructurado usando un delimitador y número de campo |
-| **`-d` en cut** | Define el delimitador (el carácter que separa campos) — por defecto es el tabulador |
-| **`-f` en cut** | Especifica qué campos extraer (1-indexed) — puede ser uno (`-f1`), varios (`-f1,3`) o un rango (`-f2-5`) |
-| **`grep`** | Global Regular Expression Print — filtra líneas que coinciden con un patrón |
-| **`^` en grep** | Ancla de inicio — el patrón debe estar al comienzo de la línea |
-| **`$` en grep** | Ancla de fin — el patrón debe estar al final de la línea |
-| **`wc`** | Word Count — cuenta líneas (`-l`), palabras (`-w`) o bytes (`-c`) de texto |
-| **`sort`** | Ordena líneas de texto — alfabético por defecto, numérico con `-n`, por campo con `-k` |
-| **`-k` en sort** | Especifica el campo por el cual ordenar (equivalente a `-f` en cut) |
-| **`uniq`** | Elimina o cuenta líneas consecutivas duplicadas — requiere `sort` previo para funcionar correctamente |
-| **`uniq -c`** | Agrega un contador al inicio de cada línea indicando cuántas veces aparece |
-| **`/etc/passwd`** | Archivo que contiene la definición de todos los usuarios del sistema — 7 campos separados por `:` |
-| **`/etc/shadow`** | Archivo que contiene las contraseñas encriptadas — solo root puede leerlo |
-| **`/usr/sbin/nologin`** | Shell especial que rechaza el inicio de sesión — usado en cuentas de servicio del sistema |
-| **Expresión regular** | Patrón de texto con sintaxis especial para describir conjuntos de cadenas — base de `grep`, `sed`, `awk` |
-| **Pipeline** | Cadena de comandos conectados por tuberías donde cada uno procesa la salida del anterior |
-| **`cowsay`** | Herramienta de entretenimiento que muestra texto con una vaca ASCII — útil para demos y banners en scripts |
-| **`tr`** | Translate — transforma texto carácter por carácter: reemplaza, elimina o comprime caracteres |
-| **`tr SET1 SET2`** | Mapea cada carácter de SET1 al carácter en la misma posición de SET2 |
-| **`tr -d`** | Delete — elimina todos los caracteres del conjunto dado sin reemplazarlos |
-| **`tr -s`** | Squeeze — comprime secuencias consecutivas del mismo carácter a uno solo |
-| **`[:lower:]`** | Clase de caracteres de tr: representa todas las letras minúsculas (a-z) |
-| **`[:upper:]`** | Clase de caracteres de tr: representa todas las letras mayúsculas (A-Z) |
-| **`[:digit:]`** | Clase de caracteres de tr: representa todos los dígitos del 0 al 9 |
-| **`[:space:]`** | Clase de caracteres de tr: espacios, tabs, y saltos de línea |
-| **`cat -A`** | Muestra todos los caracteres incluyendo ocultos — `^I` para tabs, `$` para fin de línea, `^M` para `\r` de Windows |
-| **`^I` en cat -A** | Representación visual de una tabulación (`\t`) |
-| **`^M` en cat -A** | Representación visual del retorno de carro (`\r`) — señal de que el archivo tiene formato Windows |
-| **`col -x`** | Convierte tabulaciones a los espacios equivalentes para alinear columnas |
-| **`join`** | Une líneas de dos archivos cuando comparten el mismo valor en un campo — equivale al INNER JOIN de SQL |
-| **`-1 N` en join** | Usa el campo N del primer archivo como clave de unión |
-| **`-2 M` en join** | Usa el campo M del segundo archivo como clave de unión |
-| **`-a` en join** | También incluye las líneas sin coincidencia (como LEFT JOIN en SQL) |
-| **`paste`** | Combina archivos horizontalmente: une la línea N de cada archivo en una sola línea |
-| **`paste -d`** | Define el delimitador entre columnas (por defecto es Tab) |
-| **`paste -s`** | Modo serial — serializa cada archivo: convierte sus líneas verticales en una línea horizontal |
-| **`echo -e`** | Habilita la interpretación de secuencias de escape como `\n` (nueva línea) y `\t` (tab) |
-| **`\n` en echo -e** | Inserta un salto de línea real en la salida |
-| **`\t` en echo -e** | Inserta una tabulación real en la salida |
-| **`\r`** | Retorno de carro — en Windows, las líneas terminan en `\r\n`; en Linux, solo en `\n` |
-| **`<(comando)`** | Sustitución de proceso — ejecuta el comando y pasa su salida como si fuera un archivo temporal |
-| **Sustitución de proceso** | Técnica del shell para usar la salida de un comando donde se espera un archivo (`<()`) |
-| **`-k INICIO,FIN` en sort** | Define la clave de ordenamiento: compara desde el campo INICIO hasta el campo FIN — si INICIO=FIN, usa exactamente ese campo |
-| **`-k1,1`** | Ordena usando solo el primer campo (campo 1 a campo 1) — el patrón más común para ordenar por un identificador |
-| **`-k1`** | Ordena desde el campo 1 hasta el final de la línea — más amplio que `-k1,1`, puede dar orden inesperado |
-| **Campo en sort** | Segmento de texto separado por espacios (por defecto) o por el delimitador de `-t` — numerado desde 1 |
-| **`sort -t`** | Define el delimitador de campos para sort, igual que `-d` en cut — ej. `sort -t: -k3,3n` ordena `/etc/passwd` por UID |
-| **Clave de ordenamiento** | El fragmento de cada línea que `sort` compara para decidir el orden — definido por `-k` |
-| **Deduplicar** | Eliminar entradas duplicadas de un conjunto de datos — en Linux se hace con `sort | uniq` |
-| **Duplicados consecutivos** | Líneas idénticas que están una seguida de la otra — lo único que `uniq` puede eliminar |
+> Cada entrada tiene un ejemplo que muestra la **entrada** (lo que escribes o lo que entra) y la **salida** (lo que produce). Para conceptos abstractos el ejemplo muestra cómo se manifiesta en la práctica.
+
+| Término | Definición | Entrada → Salida / Ejemplo |
+|---------|-----------|---------------------------|
+| **Terminal** | Interfaz de texto para dar comandos al sistema operativo | Abres una app de terminal → ves el prompt `$` esperando comandos |
+| **Shell** | Intérprete que lee los comandos que escribes y los ejecuta | Escribes `ls` → el shell lo interpreta y ejecuta el programa `/bin/ls` |
+| **Bash** | Bourne Again Shell — el shell por defecto en la mayoría de distribuciones Linux | `echo $SHELL` → `/bin/bash` |
+| **Comando** | Instrucción que le das al sistema — puede ser un programa o función del shell | `ls -l` → lista de archivos con detalles |
+| **Flag / Opción** | Modificador de un comando — cambia su comportamiento | `ls` → nombres; `ls -l` → nombres + permisos + tamaño |
+| **Argumento** | Dato que le pasas al comando para que trabaje con él | `rm archivo.txt` → borra ese archivo específico |
+| **Ruta absoluta** | Ruta que empieza desde la raíz `/` — siempre funciona sin importar dónde estés | `cat /etc/passwd` → funciona desde cualquier directorio |
+| **Ruta relativa** | Ruta desde el directorio actual — depende de dónde estés | Estás en `/home/labex/` → `cat proyecto/main.py` |
+| **`~`** | Atajo para el directorio home del usuario actual | `cd ~` → te lleva a `/home/labex` |
+| **`.`** | El directorio actual | `./script.sh` → ejecuta script.sh en el directorio donde estás |
+| **`..`** | El directorio padre (un nivel arriba) | Estás en `/home/labex/proyecto` → `cd ..` → vas a `/home/labex` |
+| **`/`** | La raíz del sistema de archivos | `ls /` → lista bin, etc, home, usr, var... |
+| **Pipe `\|`** | Conecta comandos: stdout del primero → stdin del segundo | `ls /etc \| wc -l` → cuenta cuántos archivos hay en /etc |
+| **Stdin** | Entrada estándar — de dónde lee datos un programa (descriptor 0) | `cat` sin argumentos lee del teclado (stdin) hasta Ctrl+D |
+| **Stdout** | Salida estándar — a dónde escribe resultados un programa (descriptor 1) | `echo "hola"` → `hola` aparece en pantalla (stdout) |
+| **Stderr** | Salida de error — canal separado para mensajes de error (descriptor 2) | `cat noexiste.txt` → `cat: noexiste.txt: No such file or directory` (stderr) |
+| **Descriptor de archivo** | Número que identifica un canal abierto: 0=stdin, 1=stdout, 2=stderr | `comando 2> error.log` → el descriptor 2 (stderr) va al archivo |
+| **`>`** | Redirige stdout a un archivo (sobreescribe) | `echo "hola" > a.txt` → archivo `a.txt` contiene `hola` |
+| **`>>`** | Redirige stdout al final de un archivo (agrega) | `echo "adios" >> a.txt` → `a.txt` tiene `hola` y `adios` |
+| **`2>`** | Redirige stderr a un archivo | `ls noexiste 2> err.log` → pantalla limpia; `err.log` tiene el error |
+| **`2>&1`** | Redirige stderr al mismo destino que stdout | `cmd > out.log 2>&1` → both en out.log |
+| **`&>`** | Atajo bash: redirige stdout y stderr juntos | `cmd &> todo.log` → equivale a `cmd > todo.log 2>&1` |
+| **`/dev/null`** | Dispositivo especial que descarta todo lo que recibe — siempre vacío | `ls > /dev/null` → nada aparece en pantalla |
+| **Proceso** | Programa en ejecución — tiene un PID único | `sleep 10 &` → crea proceso con PID 12345 |
+| **Root** | Superusuario con acceso total al sistema | Usuario `root` con UID 0 — puede leer/modificar cualquier archivo |
+| **`sudo`** | Ejecuta un comando con privilegios de root | `sudo cat /etc/shadow` → muestra el archivo (solo root puede) |
+| **Permiso** | Control de acceso: lectura (r=4), escritura (w=2), ejecución (x=1) | `chmod 755 script.sh` → dueño puede todo; otros pueden leer y ejecutar |
+| **Distribución** | Versión empaquetada de Linux con herramientas y gestor de paquetes | Ubuntu, Debian (apt), Fedora, Red Hat (dnf/yum), Arch (pacman) |
+| **Kernel** | Núcleo del SO — gestiona hardware, memoria y procesos | `uname -r` → `5.15.0-105-generic` (versión del kernel activo) |
+| **`/etc`** | Directorio de configuración del sistema | `ls /etc` → passwd, hosts, fstab, nginx/, ssh/... |
+| **`/var/log`** | Directorio donde se guardan los logs del sistema | `ls /var/log` → syslog, auth.log, nginx/, apt/... |
+| **`/home`** | Directorio que contiene los homes de todos los usuarios | `ls /home` → labex, carlos, ana (un dir por usuario) |
+| **`/tmp`** | Directorio para archivos temporales — se limpia al reiniciar | `ls /tmp` → archivos temporales de sesión actuales |
+| **`echo`** | Imprime texto en la terminal | `echo "Hola"` → `Hola` |
+| **`date`** | Muestra la fecha y hora del sistema | `date +"%Y-%m-%d"` → `2026-04-19` |
+| **`cal`** | Muestra un calendario en la terminal | `cal 2026` → calendario del año completo |
+| **`expr`** | Evalúa expresiones aritméticas enteras | `expr 5 + 3` → `8` |
+| **`figlet`** | Genera arte ASCII a partir de texto | `figlet "hola"` → texto grande en arte ASCII |
+| **`clear`** | Limpia la pantalla sin borrar el historial | pantalla llena de texto → `clear` → pantalla vacía |
+| **`Ctrl + L`** | Atajo equivalente a `clear` | misma entrada que `clear` → misma salida |
+| **Prompt** | El símbolo `$` que indica que el shell está listo | `labex:project/ $` → escribe aquí tu próximo comando |
+| **Unix timestamp** | Segundos desde 1970-01-01 00:00:00 UTC | `date +%s` → `1745078400` |
+| **`pwd`** | Print Working Directory — muestra dónde estás | `pwd` → `/home/labex/project` |
+| **Directorio de trabajo** | El directorio desde donde corren tus comandos | `cd /tmp` → el directorio de trabajo cambia a `/tmp` |
+| **`cd`** | Cambia el directorio de trabajo | `cd /etc` → ahora estás en /etc |
+| **`ls`** | Lista el contenido de un directorio | `ls /tmp` → lista de archivos y dirs en /tmp |
+| **`mkdir`** | Crea uno o más directorios | `mkdir proyecto` → crea la carpeta `proyecto/` |
+| **`touch`** | Crea un archivo vacío o actualiza su fecha | `touch nuevo.txt` → crea `nuevo.txt` con 0 bytes |
+| **`cp`** | Copia archivos o directorios | `cp a.txt b.txt` → crea copia `b.txt` con el mismo contenido |
+| **`mv`** | Mueve o renombra archivos | `mv viejo.txt nuevo.txt` → el archivo ahora se llama `nuevo.txt` |
+| **`rm`** | Elimina archivos permanentemente (sin papelera) | `rm archivo.txt` → el archivo desaparece, sin confirmar |
+| **Comodín (wildcard)** | Patrón que el shell expande antes de ejecutar | `ls *.txt` → shell expande a todos los .txt del directorio |
+| **`*`** | Representa cualquier cantidad de caracteres | `rm *.log` → borra todos los archivos que terminan en `.log` |
+| **`?`** | Representa exactamente un carácter | `ls a?.txt` → lista ab.txt, ac.txt, pero NO abc.txt |
+| **Expansión de llaves** | `{1..5}` se expande a `1 2 3 4 5` antes de ejecutar | `touch a_{1..3}.txt` → crea a_1.txt, a_2.txt, a_3.txt |
+| **`man`** | Muestra el manual completo de un comando | `man ls` → página completa con todas las opciones de ls |
+| **`--help`** | Muestra la ayuda rápida de un comando | `ls --help` → resumen de opciones en pocas líneas |
+| **`Ctrl+C`** | Interrumpe (cancela) el proceso en ejecución | proceso corriendo → `Ctrl+C` → proceso termina |
+| **`tail -f`** | Sigue un archivo en tiempo real | `tail -f /var/log/syslog` → muestra nuevas líneas conforme aparecen |
+| **`type`** | Revela la naturaleza de un comando | `type ls` → `ls is /bin/ls`; `type cd` → `cd is a shell builtin` |
+| **Built-in** | Comando integrado en el shell — no es un archivo en disco | `type cd` → `cd is a shell builtin` |
+| **Comando externo** | Programa independiente en el disco | `type grep` → `grep is /usr/bin/grep` |
+| **Alias** | Nombre alternativo para un comando | `alias ll='ls -lh'` → ahora `ll` funciona igual que `ls -lh` |
+| **`apropos`** | Busca comandos por lo que hacen | `apropos compress` → lista comandos relacionados con compresión |
+| **`mandb`** | Reconstruye la base de datos de man | `sudo mandb` → actualiza el índice de páginas man |
+| **UID** | User ID — número único del usuario | `id labex` → `uid=1000(labex)` |
+| **GID** | Group ID — número único del grupo | `id labex` → `gid=1000(labex)` |
+| **Grupo primario** | Grupo que firma los archivos que crea el usuario | `touch arch.txt` → `ls -l arch.txt` muestra el grupo primario del creador |
+| **Grupo secundario** | Grupos adicionales para acceso a recursos | `usermod -aG docker labex` → labex puede usar docker sin ser root |
+| **`/etc/group`** | Define todos los grupos del sistema | `cat /etc/group` → `sudo:x:27:labex` (grupo sudo, miembro labex) |
+| **`/etc/skel`** | Plantilla de archivos para usuarios nuevos | `ls /etc/skel` → .bashrc, .profile (se copian al crear usuario) |
+| **`adduser`** | Crea usuario interactivamente con home y contraseña | `sudo adduser ana` → hace preguntas, crea /home/ana |
+| **`useradd`** | Crea usuario sin interacción (ideal para scripts) | `sudo useradd -m -s /bin/bash carlos` → crea usuario sin preguntar nada |
+| **`groupadd`** | Crea un nuevo grupo | `sudo groupadd devs` → el grupo `devs` aparece en /etc/group |
+| **`usermod`** | Modifica configuración de usuario existente | `sudo usermod -aG devs ana` → ana ahora pertenece al grupo devs |
+| **`-aG`** | Append + Groups — agrega grupos sin quitar los existentes | `usermod -aG sudo labex` → labex puede usar sudo (ya tenía otros grupos) |
+| **`chown`** | Cambia el dueño y/o grupo de un archivo | `sudo chown ana:devs archivo.txt` → dueño=ana, grupo=devs |
+| **`chmod`** | Cambia los permisos de acceso | `chmod 755 script.sh` → `rwxr-xr-x` (dueño todo; otros solo leer+ejecutar) |
+| **Permisos rwx** | r=4, w=2, x=1 — se suman por sección | `7` = r+w+x=4+2+1; `5` = r+x=4+1; `4` = solo r |
+| **Notación numérica** | 3 dígitos: dueño-grupo-otros | `chmod 640 clave.txt` → dueño lee+escribe; grupo lee; otros nada |
+| **FHS** | Filesystem Hierarchy Standard — estructura estándar de directorios Linux | `/bin`, `/etc`, `/home`, `/var`... tienen roles definidos por el estándar |
+| **Enlace simbólico** | Acceso directo a otro archivo — `l` al inicio en `ls -l` | `ls -l /bin` → `bin -> usr/bin` (bin es un symlink a usr/bin) |
+| **Sticky bit** | Permiso especial en `/tmp` — nadie borra archivos ajenos | `ls -ld /tmp` → `drwxrwxrwt` (la `t` es el sticky bit) |
+| **`/proc`** | Filesystem virtual generado por el kernel en tiempo real | `cat /proc/cpuinfo` → info de la CPU sin acceder al disco |
+| **`tree`** | Muestra jerarquía de directorios en árbol visual | `tree /etc/ssh` → rama con todos los archivos de configuración SSH |
+| **Here-document** | Bloque multilínea entre `<< EOF` y `EOF` como entrada | `cat << EOF > f.txt` + texto + `EOF` → crea `f.txt` con el texto |
+| **`nl`** | Muestra archivo con números de línea | `nl /etc/passwd` → `1  root:x:0:0:...` `2  daemon:x:1:1:...` |
+| **`find`** | Busca archivos recorriendo el sistema de archivos | `find /var/log -name "*.log"` → lista todos los .log en /var/log |
+| **`which`** | Localiza el ejecutable de un comando | `which python3` → `/usr/bin/python3` |
+| **`nano`** | Editor de texto interactivo de terminal | `nano archivo.txt` → abre el archivo en editor visual |
+| **Variable de shell** | Variable local al proceso actual — no se hereda | `MI_VAR="valor"` → solo visible en esta sesión, no en scripts hijos |
+| **Variable de entorno** | Variable heredada por procesos hijos | `export MI_VAR="valor"` → script.sh puede leer `$MI_VAR` |
+| **`export`** | Promueve una variable de shell a variable de entorno | `export EDITOR=nano` → procesos hijos (git, crontab) abren nano |
+| **`PATH`** | Lista de directorios donde el shell busca ejecutables | `echo $PATH` → `/usr/bin:/bin:/usr/local/bin:...` |
+| **`source`** | Ejecuta archivo en el shell actual (sin subshell) | `source ~/.bashrc` → aplica cambios de config sin abrir terminal nueva |
+| **`~/.bashrc`** | Se ejecuta al abrir terminal Bash | agregar `export EDITOR=nano` aquí → permanente en bash |
+| **`~/.zshrc`** | Se ejecuta al abrir terminal Zsh | agregar `export EDITOR=nano` aquí → permanente en zsh |
+| **`unset`** | Elimina una variable de la sesión actual | `unset MI_VAR` → `echo $MI_VAR` → línea vacía |
+| **`env`** | Lista todas las variables de entorno activas | `env \| grep PATH` → muestra el valor actual de PATH |
+| **`$HOME`** | Variable con el directorio home del usuario | `echo $HOME` → `/home/labex` |
+| **`$USER`** | Variable con el nombre del usuario actual | `echo $USER` → `labex` |
+| **`$SHELL`** | Variable con la ruta del shell activo | `echo $SHELL` → `/usr/bin/zsh` |
+| **`$?`** | Código de salida del último comando ejecutado | `ls /noexiste; echo $?` → `2` (ls falló) |
+| **`<< 'EOF'`** | Here-document sin expansión — variables no se expanden | `cat << 'EOF'` + `echo $HOME` + `EOF` → imprime literalmente `$HOME` |
+| **`<< EOF`** | Here-document con expansión — variables sí se expanden | `cat << EOF` + `echo $HOME` + `EOF` → imprime `/home/labex` |
+| **Empaquetar** | Unir múltiples archivos en uno sin comprimir | `tar -cvf backup.tar docs/` → un archivo, mismo tamaño total |
+| **Comprimir** | Reducir tamaño usando algoritmos | `gzip archivo.tar` → `archivo.tar.gz`, significativamente más pequeño |
+| **`tar`** | Tape Archive — empaqueta conservando estructura y permisos | `tar -czvf backup.tar.gz proyecto/` → un archivo comprimido |
+| **`.tar.gz`** | Empaquetado + comprimido con gzip | `tar -xzvf backup.tar.gz -C /tmp/` → extrae en /tmp/ |
+| **`gzip`** | Compresor de archivos individuales | `gzip datos.tar` → crea `datos.tar.gz`, borra `datos.tar` |
+| **`zip`** | Empaqueta y comprime — compatible con Windows | `zip -r backup.zip proyecto/` → .zip que Windows puede abrir |
+| **`du`** | Mide el espacio real en disco de un directorio | `du -sh /var/log` → `244M /var/log` |
+| **`df`** | Muestra el uso de cada filesystem montado | `df -h` → tabla con Size/Used/Avail/Use% de cada disco |
+| **Filesystem** | Estructura que organiza datos en un disco | `sudo mkfs.ext4 /dev/sdb1` → formatea con sistema de archivos ext4 |
+| **ext2** | Primer filesystem estable de Linux (1993) — sin journaling | Hoy solo se usa en memorias USB pequeñas donde el journaling no vale |
+| **ext3** | Añade journaling a ext2 (2001) | Si la luz se va mientras escribe, al reiniciar recupera sin corrupción |
+| **ext4** | Estándar actual (2008) — archivos hasta 16TB, usa extents | `sudo mkfs.ext4 disco.img` → el filesystem que se usa en este lab |
+| **Journaling** | Escribe en bitácora antes de actuar — garantiza consistencia | Corte de luz a mitad de escritura → al reiniciar, ext4 revisa journal y repara en segundos |
+| **Inode** | Ficha del archivo: dueño, permisos, fechas, bloques (no el nombre) | `stat archivo.txt` → muestra el inode y todos sus metadatos |
+| **Montaje** | Conectar un filesystem a un directorio del árbol | `sudo mount /dev/sdb1 /mnt/datos` → /mnt/datos muestra el contenido del disco |
+| **Punto de montaje** | El directorio donde aterriza el contenido del disco | `/mnt/virtualdisk` en el lab — antes vacío, después lleno con el contenido del img |
+| **`/etc/fstab`** | Define qué se monta automáticamente al arrancar | `UUID=xxxx /data ext4 defaults 0 2` → ese disco monta solo al iniciar |
+| **`dd`** | Copia datos bloque a bloque | `dd if=/dev/zero of=disco.img bs=1M count=256` → crea archivo de 256MB |
+| **`/dev/zero`** | Produce ceros indefinidamente | `dd if=/dev/zero of=f bs=1M count=1` → archivo de 1MB lleno de ceros |
+| **Loop device** | Hace que un archivo funcione como disco físico | `mount -o loop disco.img /mnt/test` → el kernel crea /dev/loop0 internamente |
+| **`mkfs.ext4`** | Formatea un disco o archivo con sistema de archivos ext4 | `sudo mkfs.ext4 disco.img` → crea inodes, journal, superbloque |
+| **Partición** | Sección lógica independiente de un disco físico | `lsblk` → /dev/sda1 (40G, sistema), /dev/sda2 (swap) |
+| **`fdisk`** | Ve y edita tablas de particiones | `sudo fdisk -l` → lista todos los discos y sus particiones |
+| **`lsof`** | Lista archivos abiertos por procesos | `lsof /mnt/datos` → muestra qué proceso impide el umount |
+| **Código de salida** | Número que devuelve cada programa al terminar (0=éxito) | `ls /noexiste; echo $?` → `2`; `ls /tmp; echo $?` → `0` |
+| **`&&`** | Ejecuta el segundo solo si el primero tuvo éxito | `apt update && apt install git` → solo instala si la actualización funcionó |
+| **`\|\|`** | Ejecuta el segundo solo si el primero falló | `which tree \|\| echo "no instalado"` → muestra mensaje si tree no existe |
+| **`\|` (pipe)** | stdout del primero → stdin del segundo | `ls /etc \| grep "^d" \| wc -l` → cuántos dirs hay en /etc |
+| **`cut`** | Extrae columnas de texto con delimitador | `cut -d: -f1 /etc/passwd` → solo los nombres de usuario |
+| **`grep`** | Filtra líneas que coinciden con un patrón | `grep "root" /etc/passwd` → líneas que contienen "root" |
+| **`wc -l`** | Cuenta líneas | `ls /etc \| wc -l` → número de archivos en /etc |
+| **`sort`** | Ordena líneas de texto | `sort -t: -k3 -n /etc/passwd` → usuarios ordenados por UID |
+| **`uniq`** | Elimina líneas consecutivas duplicadas | `sort archivo \| uniq -c` → cuenta ocurrencias de cada línea |
+| **`/etc/passwd`** | Define todos los usuarios del sistema (7 campos con `:`) | `cut -d: -f1,7 /etc/passwd` → nombre y shell de cada usuario |
+| **Pipeline** | Cadena de comandos conectados por pipes | `grep "ERROR" app.log \| sort \| uniq -c \| sort -rn` |
+| **`tr`** | Transforma caracteres | `echo "hola" \| tr '[:lower:]' '[:upper:]'` → `HOLA` |
+| **`tr -d`** | Elimina caracteres | `echo "h3ll0" \| tr -d '[:digit:]'` → `hll` |
+| **`tr -s`** | Comprime repeticiones | `echo "heeello" \| tr -s 'e'` → `hello` |
+| **`cat -A`** | Muestra caracteres invisibles | `cat -A archivo` → `línea con tab^I al final$` |
+| **`col -x`** | Convierte tabs a espacios | `cat -A después de col -x` → ya no aparece `^I` |
+| **`join`** | Une archivos por campo común (como SQL JOIN) | `join empleados.txt salarios.txt` → `101 Ana 5000` |
+| **`paste`** | Combina archivos columna a columna | `paste a.txt b.txt` → línea1_a⇥línea1_b por cada fila |
+| **`paste -s`** | Serializa archivo: líneas verticales → una línea horizontal | `paste -s colores.txt` → `rojo⇥verde⇥azul` |
+| **`echo -e`** | Activa escapes como `\n` y `\t` | `echo -e "línea1\nlínea2"` → dos líneas separadas |
+| **`<(comando)`** | Sustitución de proceso: salida del comando como archivo temporal | `join <(sort a.txt) <(sort b.txt)` → no necesita archivos intermedios |
+| **`-k1,1` en sort** | Ordena solo por el campo 1 (inicio=1, fin=1) | `sort -k1,1 datos.txt` → ordena por la primera palabra de cada línea |
+| **`$()` sustitución** | Ejecuta comando y usa su salida como texto | `echo "Hoy es $(date +%Y-%m-%d)"` → `Hoy es 2026-04-19` |
+| **`"$VAR"` doble comilla** | Expande la variable pero protege de división por espacios | `echo "$PATH"` → el valor real; `echo '$PATH'` → el texto `$PATH` |
+
+---
+
+## Guía por Problema
+
+> Encuentra el comando que necesitas según lo que quieres resolver.
+> Cada comando está clasificado por prioridad:
+> **🔴 Crítico** — lo usarás todos los días
+> **🟡 Importante** — lo usarás con frecuencia
+> **🟢 Específico** — lo usarás en situaciones concretas
+
+---
+
+### 🗺️ 1. Navegación — ¿Dónde estoy y qué hay aquí?
+
+**Problema:** No sabes dónde estás en el sistema, qué hay en el directorio actual, o cómo moverte.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Salida posible |
+|--------|---------|---------------|---------|---------------|
+| 🔴 | `pwd` | Saber en qué directorio estás ahora mismo | `pwd` | `/home/labex/project` |
+| 🔴 | `ls` | Ver qué hay en el directorio actual | `ls` | `archivo.txt  docs/  script.sh` |
+| 🔴 | `ls -lh` | Ver todo con tamaños, permisos y fechas | `ls -lh` | `-rw-r--r-- 1 labex 4.2K Apr 19 main.py` |
+| 🔴 | `cd ruta` | Ir a otro directorio | `cd /var/log` | (cambia de directorio, no hay salida) |
+| 🔴 | `cd ~` | Ir al home del usuario | `cd ~` | (vas a `/home/labex`) |
+| 🔴 | `cd ..` | Subir un nivel al directorio padre | `cd ..` | (vas un nivel arriba) |
+| 🟡 | `cd -` | Volver al directorio anterior | `cd -` | `/home/labex/project` (imprime adónde volviste) |
+| 🟡 | `ls -la` | Ver archivos ocultos (los que empiezan con `.`) | `ls -la ~` | `.bashrc  .zshrc  .ssh/  ...` |
+| 🟡 | `ls *.txt` | Listar solo archivos que coinciden con el patrón | `ls *.log` | `access.log  error.log` |
+| 🟢 | `tree -L 2` | Ver la estructura completa como árbol hasta 2 niveles | `tree -L 2 /etc/ssh` | árbol visual de directorios |
+| 🟢 | `ls -lt` | Listar ordenado por fecha de modificación (más reciente primero) | `ls -lt /var/log` | logs ordenados del más nuevo al más viejo |
+
+**Combinaciones útiles:**
+```bash
+# ¿Qué archivos cambiaron en las últimas 24 horas?
+find . -mtime -1 -type f
+# Salida: ./script.sh  ./datos/reporte.csv
+
+# ¿Cuántos archivos hay en este directorio?
+ls | wc -l
+# Salida: 47
+
+# Ver solo los directorios en /etc
+ls -l /etc | grep '^d'
+# Salida: drwxr-xr-x 2 root root ... apt/  drwxr-xr-x ...
+```
+
+---
+
+### 📁 2. Archivos y Carpetas — Crear, mover, borrar
+
+**Problema:** Necesitas organizar archivos, crear estructuras de directorios, copiar, mover o eliminar.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Salida posible |
+|--------|---------|---------------|---------|---------------|
+| 🔴 | `mkdir nombre` | Crear una carpeta | `mkdir proyecto` | (crea la carpeta, sin salida) |
+| 🔴 | `mkdir -p a/b/c` | Crear toda una estructura de carpetas de una vez | `mkdir -p src/utils/helpers` | (crea los 3 niveles sin error) |
+| 🔴 | `touch archivo` | Crear un archivo vacío | `touch notas.txt` | (crea el archivo vacío) |
+| 🔴 | `cp origen destino` | Copiar un archivo | `cp config.conf config.conf.bak` | (crea la copia) |
+| 🔴 | `cp -r dir/ dest/` | Copiar una carpeta completa con su contenido | `cp -r proyecto/ proyecto_backup/` | (copia todo el árbol) |
+| 🔴 | `mv origen destino` | Mover o renombrar | `mv viejo.txt nuevo.txt` | (el archivo ahora se llama nuevo.txt) |
+| 🔴 | `rm archivo` | Eliminar un archivo permanentemente | `rm temporal.log` | (borrado sin confirmación) |
+| 🔴 | `rm -r directorio/` | Eliminar una carpeta y todo su contenido | `rm -r cache/` | (borra todo dentro de cache/) |
+| 🟡 | `rm -i archivo` | Eliminar con confirmación antes de borrar | `rm -i importante.txt` | `remove importante.txt? (y/n)` |
+| 🟡 | `touch a_{1..5}.txt` | Crear varios archivos con expansión de llaves | `touch log_{1..7}.txt` | (crea log_1.txt hasta log_7.txt) |
+| 🟢 | `rm *.log` | Eliminar todos los archivos que coinciden con el patrón | `rm *.tmp` | (borra todos los .tmp del directorio) |
+
+**Combinaciones útiles:**
+```bash
+# Hacer backup antes de editar
+cp nginx.conf nginx.conf.bak && nano nginx.conf
+# Si nano falla, el .bak está intacto
+
+# Crear estructura completa de un proyecto
+mkdir -p mi_app/{src,tests,docs,config}
+ls mi_app/
+# Salida: config/  docs/  src/  tests/
+
+# Mover todos los logs a una carpeta de archivos
+mkdir -p logs/archivos && mv *.log logs/archivos/
+```
+
+---
+
+### 📄 3. Ver Contenido — Leer archivos
+
+**Problema:** Necesitas leer el contenido de un archivo — completo, solo el principio, o el final.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Salida posible |
+|--------|---------|---------------|---------|---------------|
+| 🔴 | `cat archivo` | Ver todo el contenido de un archivo | `cat /etc/hostname` | `servidor-web-01` |
+| 🔴 | `head -n 10 archivo` | Ver las primeras N líneas | `head -n 5 access.log` | las 5 primeras líneas del log |
+| 🔴 | `tail -n 10 archivo` | Ver las últimas N líneas | `tail -n 20 error.log` | las 20 últimas líneas |
+| 🔴 | `tail -f archivo` | Seguir el archivo en tiempo real (mientras crece) | `tail -f /var/log/syslog` | muestra nuevas líneas conforme aparecen |
+| 🟡 | `nl archivo` | Ver el archivo con números de línea | `nl script.sh` | `1  #!/bin/bash` `2  echo "hola"` |
+| 🟡 | `cat -A archivo` | Ver caracteres invisibles (tabs, retorno de carro) | `cat -A archivo.csv` | `campo1^Icampo2$` (^I = tab) |
+| 🟡 | `less archivo` | Ver el archivo página a página (navega con flechas) | `less /var/log/syslog` | visor interactivo, q para salir |
+| 🟢 | `cat archivo1 archivo2` | Concatenar dos archivos en pantalla | `cat parte1.txt parte2.txt` | contenido de ambos seguido |
+| 🟢 | `wc -l archivo` | Contar cuántas líneas tiene el archivo | `wc -l /etc/passwd` | `35 /etc/passwd` |
+
+**Combinaciones útiles:**
+```bash
+# Ver los últimos errores en tiempo real mientras el app corre
+tail -f /var/log/nginx/error.log | grep "500"
+# Solo muestra errores 500 conforme llegan
+
+# Comparar el inicio y el final de un log
+head -5 app.log && echo "---" && tail -5 app.log
+# Muestra las primeras 5, un separador, y las últimas 5
+
+# ¿Cuántas líneas tiene este archivo?
+wc -l /etc/passwd
+# Salida: 35 /etc/passwd
+```
+
+---
+
+### 🔍 4. Buscar — Encontrar archivos y texto
+
+**Problema:** No sabes dónde está un archivo, o necesitas encontrar líneas específicas dentro de archivos.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Salida posible |
+|--------|---------|---------------|---------|---------------|
+| 🔴 | `grep "patron" archivo` | Buscar texto dentro de un archivo | `grep "ERROR" app.log` | líneas que contienen "ERROR" |
+| 🔴 | `grep -r "patron" dir/` | Buscar texto en todos los archivos de una carpeta | `grep -r "TODO" src/` | `src/main.py:23:  # TODO: fix this` |
+| 🔴 | `find . -name "*.log"` | Buscar archivos por nombre o patrón | `find /var -name "*.log"` | lista de todos los .log en /var |
+| 🟡 | `grep -i "patron"` | Buscar sin distinguir mayúsculas/minúsculas | `grep -i "error" app.log` | encuentra ERROR, Error, error... |
+| 🟡 | `grep -v "patron"` | Mostrar líneas que NO contienen el patrón | `grep -v "#" /etc/hosts` | solo las líneas sin comentarios |
+| 🟡 | `find . -type f -size +1M` | Buscar archivos mayores a 1MB | `find /home -size +100M` | archivos grandes que ocupan espacio |
+| 🟡 | `find . -mtime -1` | Archivos modificados en las últimas 24 horas | `find . -mtime -1` | archivos recién tocados |
+| 🟡 | `which comando` | Encontrar dónde está instalado un ejecutable | `which python3` | `/usr/bin/python3` |
+| 🟢 | `find . -name "f" 2>/dev/null` | Buscar en todo el sistema suprimiendo errores | `find / -name "sshd_config" 2>/dev/null` | `/etc/ssh/sshd_config` |
+| 🟢 | `grep -n "patron"` | Buscar mostrando el número de línea | `grep -n "def main" app.py` | `42:def main():` |
+| 🟢 | `grep -c "patron"` | Contar cuántas líneas coinciden | `grep -c "GET" access.log` | `1483` |
+
+**Combinaciones útiles:**
+```bash
+# Buscar texto en todos los archivos Python de un proyecto
+grep -r "import os" /home/labex/proyecto/ --include="*.py"
+# Salida: utils.py:3:import os  main.py:1:import os
+
+# Encontrar los 10 archivos más grandes en el home
+du -h ~ | sort -rh | head -10
+# Salida: lista de directorios ordenados por tamaño
+
+# Buscar todos los archivos de log mayores a 10MB
+find /var/log -name "*.log" -size +10M
+# Salida: /var/log/nginx/access.log  /var/log/syslog
+
+# Contar cuántos errores hay en el log del día de hoy
+grep "$(date +%Y-%m-%d)" app.log | grep -c "ERROR"
+# Salida: 7
+```
+
+---
+
+### ✂️ 5. Procesar Texto — Manipular y analizar datos
+
+**Problema:** Tienes un archivo de texto y necesitas extraer columnas, filtrar líneas, ordenar, contar o transformar.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Salida posible |
+|--------|---------|---------------|---------|---------------|
+| 🔴 | `cut -d: -f1` | Extraer una columna de texto con separador | `cut -d: -f1 /etc/passwd` | solo los nombres de usuario |
+| 🔴 | `sort archivo` | Ordenar líneas alfabéticamente | `sort nombres.txt` | lista en orden A-Z |
+| 🔴 | `sort -n archivo` | Ordenar numéricamente | `sort -n numeros.txt` | 1, 2, 10, 100 (no 1, 10, 100, 2) |
+| 🔴 | `sort \| uniq` | Eliminar duplicados (siempre después de sort) | `sort colores.txt \| uniq` | lista sin repetidos |
+| 🔴 | `sort \| uniq -c` | Contar cuántas veces aparece cada elemento | `cut -d: -f7 /etc/passwd \| sort \| uniq -c` | `30 /usr/sbin/nologin  1 /bin/bash` |
+| 🔴 | `wc -l` | Contar líneas | `grep "ERROR" app.log \| wc -l` | `47` (hay 47 errores) |
+| 🟡 | `tr 'a-z' 'A-Z'` | Convertir minúsculas a mayúsculas | `echo "hola" \| tr '[:lower:]' '[:upper:]'` | `HOLA` |
+| 🟡 | `tr -d '\r'` | Eliminar retornos de carro Windows | `cat archivo.txt \| tr -d '\r' > limpio.txt` | archivo sin `^M` al final de líneas |
+| 🟡 | `tr -s ' '` | Comprimir espacios múltiples a uno | `echo "a   b   c" \| tr -s ' '` | `a b c` |
+| 🟡 | `sort -t: -k3 -n` | Ordenar por campo específico numéricamente | `sort -t: -k3 -n /etc/passwd` | usuarios ordenados por UID |
+| 🟡 | `cut -d: -f1,6` | Extraer múltiples columnas | `cut -d: -f1,6 /etc/passwd` | `root:/root  labex:/home/labex` |
+| 🟢 | `wc -w` | Contar palabras | `wc -w documento.txt` | `342 documento.txt` |
+| 🟢 | `col -x` | Convertir tabulaciones a espacios | `cat archivo \| col -x` | texto sin tabs |
+| 🟢 | `paste -d ',' a.txt b.txt` | Unir archivos en columnas con separador | `paste -d ',' nombres.txt edades.txt` | `Ana,30  Bob,25` |
+| 🟢 | `join archivo1 archivo2` | Unir archivos por campo común (SQL JOIN) | `join empleados.txt salarios.txt` | `101 Ana 5000` |
+
+**Combinaciones útiles (los más poderosos):**
+```bash
+# ¿Cuáles son los 5 errores más frecuentes en el log?
+grep "ERROR" app.log | cut -d' ' -f5- | sort | uniq -c | sort -rn | head -5
+# Salida:
+# 142 Connection refused
+#  89 Timeout exceeded
+#  34 File not found
+#  12 Permission denied
+#   7 Disk full
+
+# ¿Cuántos usuarios usan cada shell?
+cut -d: -f7 /etc/passwd | sort | uniq -c | sort -rn
+# Salida:
+#   30 /usr/sbin/nologin
+#    1 /bin/bash
+#    1 /usr/bin/zsh
+
+# Obtener las IPs únicas que accedieron al servidor
+cut -d' ' -f1 access.log | sort | uniq -c | sort -rn | head -10
+# Salida: las 10 IPs con más accesos
+```
+
+---
+
+### 🔗 6. Pipes y Operadores — Combinar comandos
+
+**Problema:** Ningún comando hace solo lo que necesitas — hay que encadenarlos.
+
+| Prior. | Operador | Para qué sirve | Ejemplo | Resultado |
+|--------|---------|---------------|---------|-----------|
+| 🔴 | `cmd1 \| cmd2` | La salida de cmd1 es la entrada de cmd2 | `ls /etc \| wc -l` | `234` (archivos en /etc) |
+| 🔴 | `cmd1 && cmd2` | Ejecuta cmd2 solo si cmd1 tuvo éxito | `apt update && apt install git` | instala solo si update funcionó |
+| 🔴 | `cmd1 \|\| cmd2` | Ejecuta cmd2 solo si cmd1 falló | `which tree \|\| apt install tree` | instala solo si no está |
+| 🔴 | `cmd > archivo` | Guarda stdout en archivo (sobreescribe) | `ls > lista.txt` | `lista.txt` tiene el listado |
+| 🔴 | `cmd >> archivo` | Agrega stdout al final del archivo | `echo "entrada" >> log.txt` | añade sin borrar lo anterior |
+| 🔴 | `cmd 2>/dev/null` | Descarta los errores (silencia stderr) | `find / -name "*.conf" 2>/dev/null` | solo los resultados, sin "Permission denied" |
+| 🟡 | `cmd > out 2> err` | Separa stdout y stderr en archivos distintos | `make 2> errores.log` | la compilación, errores en otro archivo |
+| 🟡 | `cmd > archivo 2>&1` | Junta stdout y stderr en el mismo archivo | `./deploy.sh > deploy.log 2>&1` | todo en un solo log |
+| 🟡 | `cmd &> archivo` | Mismo que anterior (atajo bash) | `./build.sh &> build.log` | más corto, mismo efecto |
+| 🟡 | `$(comando)` | Inserta la salida de un comando dentro de otro | `echo "Fecha: $(date +%Y-%m-%d)"` | `Fecha: 2026-04-19` |
+| 🟢 | `cmd < archivo` | El archivo es la entrada del comando | `wc -l < /etc/passwd` | `35` (sin mostrar el nombre) |
+| 🟢 | `> archivo` | Vacía un archivo sin borrarlo | `> access.log` | el archivo queda con 0 bytes |
+
+**Combinaciones útiles (nivel producción):**
+```bash
+# Pipeline completo: filtrar → ordenar → deduplicar → contar
+grep "ERROR" app.log | cut -d' ' -f5 | sort | uniq -c | sort -rn
+# Cada paso reduce y organiza los datos
+
+# Instalar si no existe, silenciando errores
+which docker 2>/dev/null || sudo apt-get install -y docker.io
+# Solo instala si which falla (docker no está)
+
+# Crear respaldo con fecha, capturando posibles errores
+sudo tar -czvf backup_$(date +%Y-%m-%d).tar.gz /var/www 2>> backup_errores.log
+# El nombre incluye la fecha; los errores se acumulan en el log
+
+# Verificar todos los pasos de un deploy
+git pull && make build && make test && make deploy || echo "FALLO EN: $?"
+# Si cualquier paso falla, los siguientes no corren y se muestra el código de error
+```
+
+---
+
+### 📦 7. Variables — Guardar y reutilizar datos
+
+**Problema:** Necesitas guardar un valor para usarlo varias veces, o configurar el entorno de un proceso.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Resultado |
+|--------|---------|---------------|---------|-----------|
+| 🔴 | `NOMBRE="valor"` | Crear una variable de shell | `USUARIO="carlos"` | guarda el valor en la sesión |
+| 🔴 | `echo $NOMBRE` | Leer el valor de una variable | `echo $USUARIO` | `carlos` |
+| 🔴 | `export NOMBRE="valor"` | Hacer la variable heredable por procesos hijos | `export DB_HOST="localhost"` | el script puede leer `$DB_HOST` |
+| 🔴 | `echo $PATH` | Ver los directorios donde el shell busca comandos | `echo $PATH` | `/usr/bin:/bin:/usr/local/bin:...` |
+| 🔴 | `echo "$PATH" \| tr ':' '\n'` | Ver el PATH línea por línea | (idem) | un directorio por línea |
+| 🟡 | `export PATH="$PATH:/nuevo/dir"` | Agregar directorio al PATH sin borrar el existente | `export PATH="$PATH:$HOME/scripts"` | ahora tus scripts corren desde cualquier lugar |
+| 🟡 | `source ~/.bashrc` | Aplicar cambios de configuración sin reiniciar | `source ~/.zshrc` | los cambios en el archivo son efectivos ahora |
+| 🟡 | `unset NOMBRE` | Eliminar una variable de la sesión | `unset TEMP_TOKEN` | `echo $TEMP_TOKEN` → línea vacía |
+| 🟡 | `env` | Ver todas las variables de entorno activas | `env \| grep DB` | variables que contienen "DB" |
+| 🟡 | `VAR=$(comando)` | Guardar la salida de un comando en una variable | `FECHA=$(date +%Y-%m-%d)` | `$FECHA` contiene `2026-04-19` |
+| 🟢 | `echo $?` | Ver el código de salida del último comando | `ls /noexiste; echo $?` | `2` (ls falló) |
+| 🟢 | `echo $HOME` | Ver el home del usuario actual | `echo $HOME` | `/home/labex` |
+| 🟢 | `echo $USER` | Ver el usuario actual | `echo $USER` | `labex` |
+| 🟢 | `echo $SHELL` | Ver qué shell estás usando | `echo $SHELL` | `/usr/bin/zsh` |
+
+**Combinaciones útiles:**
+```bash
+# Guardar configuración en variables y reutilizar
+SERVIDOR="192.168.1.10"
+PUERTO="8080"
+echo "Conectando a $SERVIDOR:$PUERTO..."
+curl http://$SERVIDOR:$PUERTO/status
+# Salida: Conectando a 192.168.1.10:8080...  (luego la respuesta del servidor)
+
+# Guardar un resultado y usarlo después
+TOTAL=$(grep "ERROR" app.log | wc -l)
+echo "Se encontraron $TOTAL errores en el log"
+# Salida: Se encontraron 47 errores en el log
+
+# Agregar permanentemente al PATH en zsh
+echo 'export PATH="$PATH:$HOME/scripts"' >> ~/.zshrc
+source ~/.zshrc
+# Ahora funciona siempre, incluso en nuevas terminales
+```
+
+---
+
+### 👤 8. Usuarios y Permisos — Controlar acceso
+
+**Problema:** Necesitas crear usuarios, asignarlos a grupos, o controlar quién puede leer/escribir/ejecutar qué.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Resultado |
+|--------|---------|---------------|---------|-----------|
+| 🔴 | `whoami` | Ver con qué usuario estás operando | `whoami` | `labex` |
+| 🔴 | `ls -l` | Ver permisos de archivos | `ls -l script.sh` | `-rwxr-xr-x 1 labex labex 234 ...` |
+| 🔴 | `chmod 755 archivo` | Cambiar permisos con notación numérica | `chmod 755 deploy.sh` | dueño todo; grupo y otros leen+ejecutan |
+| 🔴 | `chmod +x archivo` | Dar permiso de ejecución | `chmod +x script.sh` | ahora se puede ejecutar con `./script.sh` |
+| 🟡 | `sudo comando` | Ejecutar con privilegios de root | `sudo apt install nginx` | instala nginx con permisos de administrador |
+| 🟡 | `chown user:grupo archivo` | Cambiar el dueño y grupo de un archivo | `sudo chown www-data:www-data index.html` | el servidor web puede leerlo |
+| 🟡 | `id usuario` | Ver UID, GID y grupos de un usuario | `id labex` | `uid=1000(labex) gid=1000(labex) groups=...` |
+| 🟡 | `groups usuario` | Ver los grupos a los que pertenece | `groups labex` | `labex sudo docker` |
+| 🟢 | `sudo adduser nombre` | Crear un usuario nuevo interactivamente | `sudo adduser ana` | crea usuario, home y contraseña |
+| 🟢 | `sudo usermod -aG grupo usuario` | Agregar usuario a un grupo | `sudo usermod -aG sudo carlos` | carlos puede usar sudo |
+| 🟢 | `sudo groupadd nombre` | Crear un nuevo grupo | `sudo groupadd devs` | el grupo "devs" existe ahora |
+
+**Permisos en notación numérica — tabla de referencia:**
+
+| Número | Permisos | Quién lo usa |
+|--------|---------|-------------|
+| `644` | `rw-r--r--` | Archivos normales (texto, config) |
+| `755` | `rwxr-xr-x` | Scripts y ejecutables públicos |
+| `700` | `rwx------` | Scripts o dirs solo del dueño |
+| `600` | `rw-------` | Archivos privados (llaves SSH, tokens) |
+| `750` | `rwxr-x---` | Scripts para el dueño y su grupo |
+
+---
+
+### 💾 9. Disco y Sistema — Espacio y almacenamiento
+
+**Problema:** El servidor está lento o lleno — necesitas investigar el espacio en disco.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Resultado |
+|--------|---------|---------------|---------|-----------|
+| 🔴 | `df -h` | Ver el espacio libre en todos los discos | `df -h` | tabla con Size/Used/Avail/Use% |
+| 🔴 | `du -sh directorio/` | Ver cuánto pesa una carpeta | `du -sh /var/log` | `244M /var/log` |
+| 🔴 | `du -h --max-depth=1 ~` | Investigar qué hay en el primer nivel | `du -h --max-depth=1 /var` | un tamaño por subdirectorio |
+| 🟡 | `du -h ~ \| sort -rh \| head -10` | Los 10 directorios más grandes | (idem) | lista de mayores consumidores |
+| 🟡 | `sudo fdisk -l` | Ver todos los discos y particiones del sistema | `sudo fdisk -l` | tabla de discos, tamaños, particiones |
+| 🟡 | `mount \| grep tipo` | Ver qué filesystems están montados | `mount \| grep ext4` | discos ext4 montados |
+| 🟢 | `df -i` | Ver uso de inodes (cuando "no space" con espacio libre) | `df -i` | tabla de inodes usados/libres |
+| 🟢 | `lsof /mnt/punto` | Ver qué proceso usa un disco montado | `lsof /mnt/datos` | proceso que impide el umount |
+
+**Flujo de diagnóstico cuando el disco está lleno:**
+```bash
+# Paso 1: ¿cuál disco está lleno?
+df -h
+# Busca la línea con Use% cerca de 100%
+
+# Paso 2: ¿qué carpeta de ese filesystem está comiendo el espacio?
+du -h --max-depth=1 /var | sort -rh | head -10
+# Ejemplo salida: 8.2G /var/log  2.1G /var/lib  ...
+
+# Paso 3: ¿qué hay dentro de esa carpeta?
+du -h --max-depth=1 /var/log | sort -rh | head -10
+# Ejemplo salida: 7.9G /var/log/app.log  (¡ese es el culpable!)
+
+# Paso 4: vaciar el log sin matar el proceso que escribe en él
+> /var/log/app.log
+```
+
+---
+
+### 🗜️ 10. Comprimir y Respaldar — Empaquetar archivos
+
+**Problema:** Necesitas comprimir archivos para ahorrar espacio, o crear respaldos.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Resultado |
+|--------|---------|---------------|---------|-----------|
+| 🔴 | `tar -czvf backup.tar.gz dir/` | Empaquetar y comprimir en un paso | `tar -czvf logs.tar.gz /var/log/` | `logs.tar.gz` comprimido |
+| 🔴 | `tar -xzvf archivo.tar.gz -C dest/` | Extraer un .tar.gz en un directorio | `tar -xzvf backup.tar.gz -C /tmp/` | extrae en /tmp/ |
+| 🔴 | `tar -tzvf archivo.tar.gz` | Ver el contenido sin extraer | `tar -tzvf backup.tar.gz \| head` | lista de archivos dentro |
+| 🟡 | `tar -czvf $(date +%Y-%m-%d).tar.gz dir/` | Respaldo con fecha en el nombre | `sudo tar -czvf $(date +%Y-%m-%d)_logs.tar.gz /var/log` | `2026-04-19_logs.tar.gz` |
+| 🟡 | `gzip archivo` | Comprimir un archivo solo (lo reemplaza con .gz) | `gzip backup.tar` | crea `backup.tar.gz`, borra `backup.tar` |
+| 🟡 | `gunzip archivo.gz` | Descomprimir .gz | `gunzip backup.tar.gz` | restaura `backup.tar` |
+| 🟡 | `zip -r archivo.zip directorio/` | Crear zip (compatible Windows) | `zip -r proyecto.zip src/` | `proyecto.zip` |
+| 🟢 | `unzip -d destino/ archivo.zip` | Extraer zip en directorio específico | `unzip -d /tmp/proj proyecto.zip` | extrae en /tmp/proj/ |
+| 🟢 | `tar -cvf archivo.tar dir/` | Solo empaquetar, sin comprimir | `tar -cvf datos.tar datos/` | `datos.tar` (mismo tamaño) |
+
+**Recetas de respaldo más usadas en producción:**
+```bash
+# Respaldo diario con fecha (para cron)
+tar -czvf /backups/$(date +%Y-%m-%d)_www.tar.gz /var/www 2>/dev/null
+
+# Verificar que el respaldo está completo
+tar -tzvf /backups/2026-04-19_www.tar.gz | wc -l
+# Salida: 1847 (1847 archivos en el respaldo)
+
+# Ver cuánto ocupa el respaldo vs el original
+du -sh /var/www && du -sh /backups/2026-04-19_www.tar.gz
+# Salida: 2.3G /var/www   312M /backups/2026-04-19_www.tar.gz
+```
+
+---
+
+### 📡 11. Redirección — Controlar dónde va la salida
+
+**Problema:** Necesitas guardar la salida de un comando, separar errores, o silenciar ruido.
+
+| Prior. | Comando | Para qué sirve | Ejemplo | Resultado |
+|--------|---------|---------------|---------|-----------|
+| 🔴 | `cmd > archivo` | Guardar stdout en archivo (sobreescribe) | `ls /etc > lista.txt` | `lista.txt` tiene el contenido |
+| 🔴 | `cmd >> archivo` | Agregar stdout al final del archivo | `echo "$(date): OK" >> deploy.log` | acumula entradas sin borrar |
+| 🔴 | `cmd 2>/dev/null` | Silenciar errores | `find / -name "f" 2>/dev/null` | solo resultados, sin "Permission denied" |
+| 🔴 | `cmd > /dev/null` | Silenciar salida normal | `make build > /dev/null` | no muestra nada, solo espera |
+| 🟡 | `cmd > out.log 2> err.log` | Separar salida normal de errores | `./script.sh > salida.log 2> errores.log` | dos archivos, cada uno con su tipo |
+| 🟡 | `cmd > archivo 2>&1` | Guardar todo en un mismo archivo | `./deploy.sh > deploy.log 2>&1` | un solo log con todo |
+| 🟡 | `cmd &> archivo` | Igual que anterior (atajo bash) | `make &> build.log` | más corto |
+| 🟢 | `> archivo` | Vaciar un archivo sin borrarlo | `> /var/log/app.log` | archivo existe pero tiene 0 bytes |
+| 🟢 | `cmd < archivo` | Usar archivo como entrada | `wc -l < /etc/passwd` | `35` (sin el nombre del archivo) |
+| 🟢 | `cat /dev/null > archivo` | Otra forma de vaciar un archivo | `cat /dev/null > access.log` | igual que `> access.log` |
+
+**El patrón más usado en scripts de producción:**
+```bash
+#!/bin/bash
+LOG="/var/log/mi_script.log"
+ERROR_LOG="/var/log/mi_script_errores.log"
+
+echo "$(date): Iniciando proceso..." >> $LOG
+
+# Ejecutar y capturar todo
+comando_principal >> $LOG 2>> $ERROR_LOG
+
+# Verificar si funcionó
+if [ $? -eq 0 ]; then
+    echo "$(date): Completado con éxito" >> $LOG
+else
+    echo "$(date): FALLO — ver $ERROR_LOG" >> $LOG
+fi
+```
+
+---
+
+### 📌 Resumen de prioridades — Lo más importante primero
+
+**🔴 Crítico — Aprende esto primero, lo usarás todos los días:**
+```
+pwd, ls, cd, mkdir, touch, cp, mv, rm
+cat, head, tail, grep, |, >, >>
+echo, export, chmod, sudo
+```
+
+**🟡 Importante — Lo necesitarás con frecuencia:**
+```
+find, sort, uniq -c, wc -l, cut, tr
+&&, ||, 2>/dev/null, $()
+du -h, df -h, tar -czvf / tar -xzvf
+```
+
+**🟢 Específico — Úsalo cuando lo necesites:**
+```
+join, paste, col -x, cat -A
+fdisk, mount, umount, mkfs.ext4
+useradd, groupadd, usermod, chown
+nl, tree, apropos, mandb
+```
